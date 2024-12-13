@@ -86,6 +86,7 @@ def try_remove(path):
 if args.clean:
     print("Cleaning...")
     try_remove(os.path.join(dir_path, "qasan-qemu"))
+    try_remove(os.path.join(dir_path, "qasan-system"))
     try_remove(os.path.join(dir_path, "libqasan.so"))
     try_remove(os.path.join(dir_path, "libqasan", "libqasan.so"))
     # try_remove(output_dso)
@@ -269,7 +270,7 @@ if not args.system:
       dir_path
     )
 
-    print("Successful build.")
+    print("user mode Successful build.")
     print("Test it with ./qasan /bin/ls")
     print("")
 # 系统模式
@@ -294,5 +295,5 @@ else:
       os.path.join(dir_path, "qasan-system")
     )
 
-    print("Successful build.")
+    print("system mode Successful build.")
     print("")

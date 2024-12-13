@@ -361,7 +361,9 @@ static void afl_forkserver(CPUState *cpu) {
 void afl_persistent_loop() {
 
   static u32            cycle_cnt;
-  static struct afl_tsl exit_cmd_tsl = {{-1, 0, 0, 0}, NULL};
+  static struct afl_tsl exit_cmd_tsl = {{-1, 0, 0, 0}, 0};
+  // error: incompatible pointer to integer conversion initializing 'char' with an expression of type 'void *' [-Wint-conversion]
+  // static struct afl_tsl exit_cmd_tsl = {{-1, 0, 0, 0}, NULL};
 
   if (!afl_fork_child) return;
 

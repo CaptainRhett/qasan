@@ -1,0 +1,2430 @@
+####################################################################
+diff --git a/accel/tcg/cpu-exec.c b/accel/tcg/cpu-exec.c
+index 870027d4..fc848c89 100644
+--- a/accel/tcg/cpu-exec.c
++++ b/accel/tcg/cpu-exec.c
+@@ -36,6 +36,8 @@
+ #include "sysemu/cpus.h"
+ #include "sysemu/replay.h"
+ 
++#include "../afl/afl-qemu-cpu-inl.h"
++
+ /* -icount align implementation. */
+ 
+ typedef struct SyncClocks {
+# 引入 afl-qemu-cpu-inl.h 文件
+
+@@ -144,6 +146,8 @@ static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
+     int tb_exit;
+     uint8_t *tb_ptr = itb->tc.ptr;
+ 
++    AFL_QEMU_CPU_SNIPPET2;
++
+     qemu_log_mask_and_addr(CPU_LOG_EXEC, itb->pc,
+                            "Trace %d: %p ["
+                            TARGET_FMT_lx "/" TARGET_FMT_lx "/%#x] %s\n",
+# 在 cpu_tb_exec 函数中添加了 AFL_QEMU_CPU_SNIPPET2 宏
+
+@@ -397,11 +401,13 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
+     TranslationBlock *tb;
+     target_ulong cs_base, pc;
+     uint32_t flags;
++    bool was_translated = false, was_chained = false;
+# 引入了这两个标志变量，用于指示一个翻译块是否已经被翻译，或者是否与前一个翻译块相连接。
+ 
+     tb = tb_lookup__cpu_state(cpu, &pc, &cs_base, &flags, cf_mask);
+     if (tb == NULL) {
+         mmap_lock();
+         tb = tb_gen_code(cpu, pc, cs_base, flags, cf_mask);
++        was_translated = true;
+         mmap_unlock();
+         /* We add the TB in the virtual pc hash table for the fast lookup */
+         atomic_set(&cpu->tb_jmp_cache[tb_jmp_cache_hash_func(pc)], tb);
+# tb是翻译块，检查是否找到了翻译块，如果没有找到则会生成新的翻译块，并设置was_translated为 true
+
+@@ -418,6 +424,10 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
+     /* See if we can patch the calling TB. */
+     if (last_tb) {
+         tb_add_jump(last_tb, tb_exit, tb);
++        was_chained = true;
++    }
++    if (was_translated || was_chained) {
++        afl_request_tsl(pc, cs_base, flags, cf_mask, was_chained ? last_tb : NULL, tb_exit);
+     }
+     return tb;
+ }
+# 当翻译块被生成或连接时，调用 afl_request_tsl，传递相关信息。
+# 在这里增加了 AFL 相关的跟踪和请求。这有助于将翻译块的执行、生成和连接情况反馈给 AFL，从而进一步进行动态模糊测试。
+# 通过这种方式，QEMU 在执行过程中能够触发 AFL 的模糊测试，收集更多的执行路径数据，从而提高漏洞发现的可能性。
+
+####################################################################
+diff --git a/accel/tcg/cputlb.c b/accel/tcg/cputlb.c
+index af6bd8cc..db140c7a 100644
+--- a/accel/tcg/cputlb.c
++++ b/accel/tcg/cputlb.c
+@@ -809,7 +809,7 @@ static void io_writex(CPUArchState *env, CPUIOTLBEntry *iotlbentry,
+ 
+ /* Return true if ADDR is present in the victim tlb, and has been copied
+    back to the main tlb.  */
+-static bool victim_tlb_hit(CPUArchState *env, size_t mmu_idx, size_t index,
++bool victim_tlb_hit(CPUArchState *env, size_t mmu_idx, size_t index,
+                            size_t elt_ofs, target_ulong page)
+ {
+     size_t vidx;
+# 去掉了 victim_tlb_hit 函数的 static 关键字
+# 原本 victim_tlb_hit 函数是 static 的，意味着它只能在当前的 cputlb.c 文件中被访问。去掉 static 关键字后，这个函数变成了全局可访问的函数，可以在其他文件中调用
+# AFL 相关的代码可能需要访问这个函数以进行进一步的处理或跟踪。通过将其变为全局函数，外部模块就可以直接调用它，进行 TLB（Translation Lookaside Buffer）相关的处理。
+
+####################################################################
+diff --git a/accel/tcg/tcg-runtime.c b/accel/tcg/tcg-runtime.c
+index d0d44844..b01ba497 100644
+--- a/accel/tcg/tcg-runtime.c
++++ b/accel/tcg/tcg-runtime.c
+@@ -167,3 +167,1022 @@ void HELPER(exit_atomic)(CPUArchState *env)
+ {
+     cpu_loop_exit_atomic(ENV_GET_CPU(env), GETPC());
+ }
++
++/////////////////////////////////////////////////
++//                   QASAN
++/////////////////////////////////////////////////
++
++#include "qasan-qemu.h"
++
++// options
++int qasan_max_call_stack = 16; // QASAN_MAX_CALL_STACK
++int qasan_symbolize = 1; // QASAN_SYMBOLIZE
++
++#ifndef CONFIG_USER_ONLY
++
++__thread CPUState* qasan_cpu;
++#define g2h(x) \
++  ({ \
++    void *_a; \
++    if (!qasan_addr_to_host(qasan_cpu, (x), &_a)) {\
++      /* fprintf(stderr, "QASan error: virtual address translation for %p failed!\n", (x)); */ \
++      return 0;\
++    } \
++    _a; \
++  })
++
++// h2g must not be defined
++// #define h2g(x) (x)
++
++#endif
++
++int qasan_addr_to_host(CPUState* cpu, target_ulong addr, void** host_addr);
++
++int __qasan_debug;
++__thread int qasan_disabled;
++
++__thread struct shadow_stack qasan_shadow_stack;
++
++#ifdef ASAN_GIOVESE
++
++#include "../../asan-giovese/interval-tree/rbtree.c"
++#include "../../asan-giovese/asan-giovese-inl.h"
++
++#include <sys/types.h>
++#include <sys/syscall.h>
++
++void asan_giovese_populate_context(struct call_context* ctx, target_ulong pc) {
++
++  ctx->size = MIN(qasan_shadow_stack.size, qasan_max_call_stack -1) +1;
++  ctx->addresses = calloc(sizeof(void*), ctx->size);
++  
++#ifdef __NR_gettid
++  ctx->tid = (uint32_t)syscall(__NR_gettid);
++#else
++  pthread_id_np_t tid;
++  pthread_t self = pthread_self();
++  pthread_getunique_np(&self, &tid);
++  ctx->tid = (uint32_t)tid;
++#endif
++
++  ctx->addresses[0] = pc;
++  
++  if (qasan_shadow_stack.size <= 0) return; //can be negative when pop does not find nothing
++  
++  int i, j = 1;
++  for (i = qasan_shadow_stack.first->index -1; i >= 0 && j < qasan_max_call_stack; --i)
++    ctx->addresses[j++] = qasan_shadow_stack.first->buf[i];
++
++  struct shadow_stack_block* b = qasan_shadow_stack.first->next;
++  while (b && j < qasan_max_call_stack) {
++  
++    for (i = SHADOW_BK_SIZE-1; i >= 0; --i)
++      ctx->addresses[j++] = b->buf[i];
++  
++  }
++
++}
++
++#ifdef CONFIG_USER_ONLY
++
++static void addr2line_cmd(char* lib, uintptr_t off, char** function, char** line) {
++  
++  if (!qasan_symbolize) goto addr2line_cmd_skip;
++  
++  FILE *fp;
++
++  size_t cmd_siz = 128 + strlen(lib);
++  char* cmd = malloc(cmd_siz);
++  snprintf(cmd, cmd_siz, "addr2line -f -e '%s' 0x%lx", lib, off);
++
++  fp = popen(cmd, "r");
++  free(cmd);
++  
++  if (fp == NULL) goto addr2line_cmd_skip;
++
++  *function = malloc(PATH_MAX + 32);
++  
++  if (!fgets(*function, PATH_MAX + 32, fp) || !strncmp(*function, "??", 2)) {
++
++    free(*function);
++    *function = NULL;
++
++  } else {
++
++    size_t l = strlen(*function);
++    if (l && (*function)[l-1] == '\n')
++      (*function)[l-1] = 0;
++      
++  }
++  
++  *line = malloc(PATH_MAX + 32);
++  
++  if (!fgets(*line, PATH_MAX + 32, fp) || !strncmp(*line, "??:", 3) ||
++      !strncmp(*line, ":?", 2)) {
++
++    free(*line);
++    *line = NULL;
++
++  } else {
++
++    size_t l = strlen(*line);
++    if (l && (*line)[l-1] == '\n')
++      (*line)[l-1] = 0;
++      
++  }
++  
++  pclose(fp);
++  
++  return;
++
++addr2line_cmd_skip:
++  *line = NULL;
++  *function = NULL;
++  
++}
++
++char* asan_giovese_printaddr(target_ulong guest_addr) {
++
++  FILE *fp;
++  char *line = NULL;
++  size_t len = 0;
++  ssize_t read;
++
++  fp = fopen("/proc/self/maps", "r");
++  if (fp == NULL)
++      return NULL;
++  
++  uint64_t img_min = 0, img_max = 0;
++  char img_path[512] = {0};
++
++  while ((read = getline(&line, &len, fp)) != -1) {
++  
++    int fields, dev_maj, dev_min, inode;
++    uint64_t min, max, offset;
++    char flag_r, flag_w, flag_x, flag_p;
++    char path[512] = "";
++    fields = sscanf(line, "%"PRIx64"-%"PRIx64" %c%c%c%c %"PRIx64" %x:%x %d"
++                    " %512s", &min, &max, &flag_r, &flag_w, &flag_x,
++                    &flag_p, &offset, &dev_maj, &dev_min, &inode, path);
++
++    if ((fields < 10) || (fields > 11))
++        continue;
++
++    if (h2g_valid(min)) {
++
++      int flags = page_get_flags(h2g(min));
++      max = h2g_valid(max - 1) ? max : (uintptr_t)g2h(GUEST_ADDR_MAX) + 1;
++      if (page_check_range(h2g(min), max - min, flags) == -1)
++          continue;
++      
++      if (img_min && !strcmp(img_path, path)) {
++        img_max = max;
++      } else {
++        img_min = min;
++        img_max = max;
++        strncpy(img_path, path, 512);
++      }
++
++      if (guest_addr >= h2g(min) && guest_addr < h2g(max - 1) + 1) {
++      
++        uintptr_t off = guest_addr - h2g(img_min);
++      
++        char* s;
++        char * function = NULL;
++        char * codeline = NULL;
++        if (strlen(path)) {
++          addr2line_cmd(path, off, &function, &codeline);
++          if (!function)
++            addr2line_cmd(path, guest_addr, &function, &codeline);
++        }
++
++        if (function) {
++        
++          if (codeline) {
++          
++            size_t l = strlen(function) + strlen(codeline) + 32;
++            s = malloc(l);
++            snprintf(s, l, " in %s %s", function, codeline);
++            free(codeline);
++            
++          } else {
++
++            size_t l = strlen(function) + strlen(path) + 32;
++            s = malloc(l);
++            snprintf(s, l, " in %s (%s+0x%lx)", function, path,
++                     off);
++
++          }
++          
++          free(function);
++        
++        } else {
++
++          size_t l = strlen(path) + 32;
++          s = malloc(l);
++          snprintf(s, l, " (%s+0x%lx)", path, off);
++
++        }
++
++        free(line);
++        fclose(fp);
++        return s;
++        
++      }
++
++    }
++
++  }
++
++  free(line);
++  fclose(fp);
++
++  return NULL;
++
++}
++#else
++char* asan_giovese_printaddr(TARGET_ULONG guest_addr) {
++
++  return NULL;
++
++}
++#endif
++
++#endif
++
++void HELPER(qasan_shadow_stack_push)(target_ulong ptr) {
++
++#if defined(TARGET_ARM)
++  ptr &= ~1;
++#endif
++
++  if (unlikely(!qasan_shadow_stack.first)) {
++    
++    qasan_shadow_stack.first = malloc(sizeof(struct shadow_stack_block));
++    qasan_shadow_stack.first->index = 0;
++    qasan_shadow_stack.size = 0; // may be negative due to last pop
++    qasan_shadow_stack.first->next = NULL;
++
++  }
++    
++  qasan_shadow_stack.first->buf[qasan_shadow_stack.first->index++] = ptr;
++  qasan_shadow_stack.size++;
++
++  if (qasan_shadow_stack.first->index >= SHADOW_BK_SIZE) {
++
++      struct shadow_stack_block* ns = malloc(sizeof(struct shadow_stack_block));
++      ns->next = qasan_shadow_stack.first;
++      ns->index = 0;
++      qasan_shadow_stack.first = ns;
++  }
++
++}
++
++void HELPER(qasan_shadow_stack_pop)(target_ulong ptr) {
++
++#if defined(TARGET_ARM)
++  ptr &= ~1;
++#endif
++
++  struct shadow_stack_block* cur_bk = qasan_shadow_stack.first;
++  if (unlikely(cur_bk == NULL)) return;
++
++  if (cur_bk->index == 0) {
++
++    struct shadow_stack_block* ns = cur_bk->next;
++    if (!ns) return;
++    if (ns->buf[ns->index -1] != ptr) return;
++
++    free(cur_bk);
++    qasan_shadow_stack.first = ns;
++    ns->index--;
++
++  } else if (cur_bk->buf[cur_bk->index -1] == ptr) {
++    
++    cur_bk->index--;
++
++  } else return;
++
++  qasan_shadow_stack.size--;
++
++  /*
++  do {
++      
++      cur_bk->index--;
++      qasan_shadow_stack.size--;
++      
++      if (cur_bk->index < 0) {
++          
++          struct shadow_stack_block* ns = cur_bk->next;
++          free(cur_bk);
++          cur_bk = ns;
++          if (!cur_bk) break;
++          cur_bk->index--;
++      }
++  
++  } while(cur_bk->buf[cur_bk->index] != ptr);
++  
++  qasan_shadow_stack.first = cur_bk;
++  */
++
++}
++
++target_long qasan_actions_dispatcher(void *cpu_env,
++                                     target_long action, target_long arg1,
++                                     target_long arg2, target_long arg3) {
++
++    CPUArchState *env = cpu_env;
++#ifndef CONFIG_USER_ONLY
++    qasan_cpu = ENV_GET_CPU(env);
++#endif
++
++    switch(action) {
++#ifdef ASAN_GIOVESE
++        case QASAN_ACTION_CHECK_LOAD:
++        // fprintf(stderr, "CHECK LOAD: %p [%p] %ld\n", arg1, g2h(arg1), arg2);
++        if (asan_giovese_guest_loadN(arg1, arg2)) {
++          asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, arg1, arg2, PC_GET(env), BP_GET(env), SP_GET(env));
++        }
++        break;
++        
++        case QASAN_ACTION_CHECK_STORE:
++        // fprintf(stderr, "CHECK STORE: %p [%p] %ld\n", arg1, g2h(arg1), arg2);
++        if (asan_giovese_guest_storeN(arg1, arg2)) {
++          asan_giovese_report_and_crash(ACCESS_TYPE_STORE, arg1, arg2, PC_GET(env), BP_GET(env), SP_GET(env));
++        }
++        break;
++        
++        case QASAN_ACTION_POISON:
++        // fprintf(stderr, "POISON: %p [%p] %ld %x\n", arg1, g2h(arg1), arg2, arg3);
++        asan_giovese_poison_guest_region(arg1, arg2, arg3);
++        break;
++        
++        case QASAN_ACTION_USER_POISON:
++        //fprintf(stderr, "USER POISON: %p [%p] %ld\n", arg1, g2h(arg1), arg2);
++        asan_giovese_user_poison_guest_region(arg1, arg2);
++        break;
++        
++        case QASAN_ACTION_UNPOISON:
++        //fprintf(stderr, "UNPOISON: %p [%p] %ld\n", arg1, g2h(arg1), arg2);
++        asan_giovese_unpoison_guest_region(arg1, arg2);
++        break;
++        
++        case QASAN_ACTION_IS_POISON:
++        return asan_giovese_guest_loadN(arg1, arg2);
++        
++        case QASAN_ACTION_ALLOC: {
++          //fprintf(stderr, "ALLOC: %p - %p\n", arg1, arg2);
++          struct call_context* ctx = calloc(sizeof(struct call_context), 1);
++          asan_giovese_populate_context(ctx, PC_GET(env));
++          asan_giovese_alloc_insert(arg1, arg2, ctx);
++          break;
++        }
++        
++        case QASAN_ACTION_DEALLOC: {
++          //fprintf(stderr, "DEALLOC: %p\n", arg1);
++          struct chunk_info* ckinfo = asan_giovese_alloc_search(arg1);
++          if (ckinfo) {
++            if (ckinfo->start != arg1)
++              asan_giovese_badfree(arg1, PC_GET(env));
++            ckinfo->free_ctx = calloc(sizeof(struct call_context), 1);
++            asan_giovese_populate_context(ckinfo->free_ctx, PC_GET(env));
++          } else {
++            asan_giovese_badfree(arg1, PC_GET(env));
++          }
++          break;
++        }
++#else
++        case QASAN_ACTION_CHECK_LOAD:
++        __asan_loadN(g2h(arg1), arg2);
++        break;
++        
++        case QASAN_ACTION_CHECK_STORE:
++        __asan_storeN(g2h(arg1), arg2);
++        break;
++        
++        case QASAN_ACTION_POISON:
++        __asan_poison_memory_region(g2h(arg1), arg2);
++        break;
++        
++        case QASAN_ACTION_USER_POISON:
++        __asan_poison_memory_region(g2h(arg1), arg2);
++        break;
++        
++        case QASAN_ACTION_UNPOISON:
++        __asan_unpoison_memory_region(g2h(arg1), arg2);
++        break;
++        
++        case QASAN_ACTION_IS_POISON:
++        return __asan_region_is_poisoned(g2h(arg1), arg2) != NULL;
++        
++        case QASAN_ACTION_ALLOC:
++          break;
++        
++        case QASAN_ACTION_DEALLOC:
++          break;
++#endif
++
++        case QASAN_ACTION_ENABLE:
++        qasan_disabled = 0;
++        break;
++        
++        case QASAN_ACTION_DISABLE:
++        qasan_disabled = 1;
++        break;
++
++        case QASAN_ACTION_SWAP_STATE: {
++          int r = qasan_disabled;
++          qasan_disabled = arg1;
++          return r;
++        }
++
++        default:
++        fprintf(stderr, "Invalid QASAN action %ld\n", action);
++        abort();
++    }
++
++    return 0;
++}
++
++void* HELPER(qasan_fake_instr)(CPUArchState *env, void* action, void* arg1,
++                               void* arg2, void* arg3) {
++
++  return (void*)qasan_actions_dispatcher(env,
++                                         (target_long)action, (target_long)arg1,
++                                         (target_long)arg2, (target_long)arg3);
++
++}
++
++#ifndef CONFIG_USER_ONLY
++
++//----------------------------------
++// Full system helpers for TLB walk
++//----------------------------------
++
++/* Macro to call the above, with local variables from the use context.  */
++#define VICTIM_TLB_HIT(TY, ADDR) \
++  victim_tlb_hit(env, mmu_idx, index, offsetof(CPUTLBEntry, TY), \
++                 (ADDR) & TARGET_PAGE_MASK)
++
++bool victim_tlb_hit(CPUArchState *env, size_t mmu_idx, size_t index,
++                           size_t elt_ofs, target_ulong page);
++
++void qasan_page_loadN(CPUArchState *env, target_ulong addr, size_t size, uintptr_t mmu_idx)
++{
++    CPUTLBEntry *entry = tlb_entry(env, mmu_idx, addr);
++    target_ulong tlb_addr = entry->addr_read;
++    uintptr_t haddr;
++    
++    /* It is in the TLB, the check is after the real access */
++    if (!tlb_hit(tlb_addr, addr)) return;
++
++    /* Handle an IO access.  */
++    if (unlikely(tlb_addr & ~TARGET_PAGE_MASK))
++        return;
++
++    haddr = addr + entry->addend;
++    
++#ifdef ASAN_GIOVESE
++    if (asan_giovese_loadN((void*)haddr, size)) {
++      qasan_cpu = ENV_GET_CPU(env);
++      asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, addr, size, PC_GET(env), BP_GET(env), SP_GET(env));
++    }
++#else
++    __asan_loadN((void*)haddr, size);
++#endif
++}
++
++void qasan_page_storeN(CPUArchState *env, target_ulong addr, size_t size, uintptr_t mmu_idx)
++{
++    CPUTLBEntry *entry = tlb_entry(env, mmu_idx, addr);
++    target_ulong tlb_addr = entry->addr_read;
++    uintptr_t haddr;
++    
++    /* It is in the TLB, the check is after the real access */
++    if (!tlb_hit(tlb_addr, addr)) return;
++
++    /* Handle an IO access.  */
++    if (unlikely(tlb_addr & ~TARGET_PAGE_MASK))
++        return;
++
++    haddr = addr + entry->addend;
++    
++#ifdef ASAN_GIOVESE
++    if (asan_giovese_storeN((void*)haddr, size)) {
++      qasan_cpu = ENV_GET_CPU(env);
++      asan_giovese_report_and_crash(ACCESS_TYPE_STORE, addr, size, PC_GET(env), BP_GET(env), SP_GET(env));
++    }
++#else
++    __asan_storeN((void*)haddr, size);
++#endif
++}
++
++void HELPER(qasan_load1)(CPUArchState *env, target_ulong addr, uint32_t idx)
++{
++    if (qasan_disabled) return;
++    
++    uintptr_t mmu_idx = idx;
++    CPUTLBEntry *entry = tlb_entry(env, mmu_idx, addr);
++    target_ulong tlb_addr = entry->addr_read;
++    uintptr_t haddr;
++
++    /* It is in the TLB, the check is after the real access */
++    if (!tlb_hit(tlb_addr, addr)) return;
++
++    /* Handle an IO access.  */
++    if (unlikely(tlb_addr & ~TARGET_PAGE_MASK))
++        return;
++
++    haddr = addr + entry->addend;
++    
++#ifdef ASAN_GIOVESE
++    if (asan_giovese_load1((void*)haddr)) {
++      qasan_cpu = ENV_GET_CPU(env);
++      asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, addr, 1, PC_GET(env), BP_GET(env), SP_GET(env));
++    }
++#else
++    __asan_load1((void*)haddr);
++#endif
++}
++
++void HELPER(qasan_load2)(CPUArchState *env, target_ulong addr, uint32_t idx)
++{
++    if (qasan_disabled) return;
++    
++    uintptr_t mmu_idx = idx;
++    CPUTLBEntry *entry = tlb_entry(env, mmu_idx, addr);
++    target_ulong tlb_addr = entry->addr_read;
++    uintptr_t haddr;
++
++    /* It is in the TLB, the check is after the real access */
++    if (!tlb_hit(tlb_addr, addr)) return;
++
++    /* Handle an IO access.  */
++    if (unlikely(tlb_addr & ~TARGET_PAGE_MASK))
++        return;
++
++    /* Handle slow unaligned access (it spans two pages or IO).  */
++    if (unlikely((addr & ~TARGET_PAGE_MASK) + 2 - 1
++                    >= TARGET_PAGE_SIZE)) {
++        target_ulong addr1, addr2;
++
++        addr1 = addr & ~(2 - 1);
++        addr2 = addr1 + 2;
++        
++        size_t span = addr2 - addr;
++        haddr = addr + entry->addend;
++        
++        // tlb already processed for first half
++#ifdef ASAN_GIOVESE
++        if (asan_giovese_loadN((void*)haddr, span)) {
++          qasan_cpu = ENV_GET_CPU(env);
++          asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, addr, span, PC_GET(env), BP_GET(env), SP_GET(env));
++        }
++#else
++        __asan_loadN((void*)haddr, span);
++#endif
++        
++        qasan_page_loadN(env, addr2, 2 - span, mmu_idx);
++        return;
++    }
++
++    haddr = addr + entry->addend;
++    
++#ifdef ASAN_GIOVESE
++    if (asan_giovese_load2((void*)haddr)) {
++      qasan_cpu = ENV_GET_CPU(env);
++      asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, addr, 2, PC_GET(env), BP_GET(env), SP_GET(env));
++    }
++#else
++    __asan_load2((void*)haddr);
++#endif
++}
++
++void HELPER(qasan_load4)(CPUArchState *env, target_ulong addr, uint32_t idx)
++{
++    if (qasan_disabled) return;
++
++    uintptr_t mmu_idx = idx;
++    CPUTLBEntry *entry = tlb_entry(env, mmu_idx, addr);
++    target_ulong tlb_addr = entry->addr_read;
++    uintptr_t haddr;
++    
++    /* It is in the TLB, the check is after the real access */
++    if (!tlb_hit(tlb_addr, addr)) return;
++
++    /* Handle an IO access.  */
++    if (unlikely(tlb_addr & ~TARGET_PAGE_MASK))
++        return;
++
++    /* Handle slow unaligned access (it spans two pages or IO).  */
++    if (unlikely((addr & ~TARGET_PAGE_MASK) + 4 - 1
++                    >= TARGET_PAGE_SIZE)) {
++        target_ulong addr1, addr2;
++
++        addr1 = addr & ~(4 - 1);
++        addr2 = addr1 + 4;
++        
++        size_t span = addr2 - addr;
++        haddr = addr + entry->addend;
++        
++        // tlb already processed for first half
++#ifdef ASAN_GIOVESE
++        if (asan_giovese_loadN((void*)haddr, span)) {
++          qasan_cpu = ENV_GET_CPU(env);
++          asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, addr, span, PC_GET(env), BP_GET(env), SP_GET(env));
++        }
++#else
++        __asan_loadN((void*)haddr, span);
++#endif
++        
++        qasan_page_loadN(env, addr2, 4 - span, mmu_idx);
++        return;
++    }
++
++    haddr = addr + entry->addend;
++    
++#ifdef ASAN_GIOVESE
++    if (asan_giovese_load4((void*)haddr)) {
++      qasan_cpu = ENV_GET_CPU(env);
++      asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, addr, 4, PC_GET(env), BP_GET(env), SP_GET(env));
++    }
++#else
++    __asan_load4((void*)haddr);
++#endif
++}
++
++void HELPER(qasan_load8)(CPUArchState *env, target_ulong addr, uint32_t idx)
++{
++    if (qasan_disabled) return;
++
++    uintptr_t mmu_idx = idx;
++    CPUTLBEntry *entry = tlb_entry(env, mmu_idx, addr);
++    target_ulong tlb_addr = entry->addr_read;
++    uintptr_t haddr;
++
++    /* It is in the TLB, the check is after the real access */
++    if (!tlb_hit(tlb_addr, addr)) return;
++
++    /* Handle an IO access.  */
++    if (unlikely(tlb_addr & ~TARGET_PAGE_MASK))
++        return;
++
++    /* Handle slow unaligned access (it spans two pages or IO).  */
++    if (unlikely((addr & ~TARGET_PAGE_MASK) + 8 - 1
++                    >= TARGET_PAGE_SIZE)) {
++        target_ulong addr1, addr2;
++
++        addr1 = addr & ~(8 - 1);
++        addr2 = addr1 + 8;
++        
++        size_t span = addr2 - addr;
++        haddr = addr + entry->addend;
++        
++        // tlb already processed for first half
++#ifdef ASAN_GIOVESE
++        if (asan_giovese_loadN((void*)haddr, span)) {
++          qasan_cpu = ENV_GET_CPU(env);
++          asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, addr, span, PC_GET(env), BP_GET(env), SP_GET(env));
++        }
++#else
++        __asan_loadN((void*)haddr, span);
++#endif
++        
++        qasan_page_loadN(env, addr2, 8 - span, mmu_idx);
++        return;
++    }
++
++    haddr = addr + entry->addend;
++    
++#ifdef ASAN_GIOVESE
++    if (asan_giovese_load8((void*)haddr)) {
++      qasan_cpu = ENV_GET_CPU(env);
++      asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, addr, 8, PC_GET(env), BP_GET(env), SP_GET(env));
++    }
++#else
++    __asan_load8((void*)haddr);
++#endif
++}
++
++void HELPER(qasan_store1)(CPUArchState *env, target_ulong addr, uint32_t idx)
++{
++    if (qasan_disabled) return;
++    
++    uintptr_t mmu_idx = idx;
++    CPUTLBEntry *entry = tlb_entry(env, mmu_idx, addr);
++    target_ulong tlb_addr = entry->addr_read;
++    uintptr_t haddr;
++
++    /* It is in the TLB, the check is after the real access */
++    if (!tlb_hit(tlb_addr, addr)) return;
++
++    /* Handle an IO access.  */
++    if (unlikely(tlb_addr & ~TARGET_PAGE_MASK))
++        return;
++
++    haddr = addr + entry->addend;
++    
++#ifdef ASAN_GIOVESE
++    if (asan_giovese_store1((void*)haddr)) {
++      qasan_cpu = ENV_GET_CPU(env);
++      asan_giovese_report_and_crash(ACCESS_TYPE_STORE, addr, 1, PC_GET(env), BP_GET(env), SP_GET(env));
++    }
++#else
++    __asan_store1((void*)haddr);
++#endif
++}
++
++void HELPER(qasan_store2)(CPUArchState *env, target_ulong addr, uint32_t idx)
++{
++    if (qasan_disabled) return;
++    
++    uintptr_t mmu_idx = idx;
++    CPUTLBEntry *entry = tlb_entry(env, mmu_idx, addr);
++    target_ulong tlb_addr = entry->addr_read;
++    uintptr_t haddr;
++
++    /* It is in the TLB, the check is after the real access */
++    if (!tlb_hit(tlb_addr, addr)) return;
++
++    /* Handle an IO access.  */
++    if (unlikely(tlb_addr & ~TARGET_PAGE_MASK))
++        return;
++
++    /* Handle slow unaligned access (it spans two pages or IO).  */
++    if (unlikely((addr & ~TARGET_PAGE_MASK) + 2 - 1
++                    >= TARGET_PAGE_SIZE)) {
++        target_ulong addr1, addr2;
++
++        addr1 = addr & ~(2 - 1);
++        addr2 = addr1 + 2;
++        
++        size_t span = addr2 - addr;
++        haddr = addr + entry->addend;
++        
++        // tlb already processed for first half
++#ifdef ASAN_GIOVESE
++        if (asan_giovese_storeN((void*)haddr, span)) {
++          qasan_cpu = ENV_GET_CPU(env);
++          asan_giovese_report_and_crash(ACCESS_TYPE_STORE, addr, span, PC_GET(env), BP_GET(env), SP_GET(env));
++        }
++#else
++        __asan_storeN((void*)haddr, span);
++#endif
++        
++        qasan_page_storeN(env, addr2, 2 - span, mmu_idx);
++        return;
++    }
++
++    haddr = addr + entry->addend;
++    
++#ifdef ASAN_GIOVESE
++    if (asan_giovese_store2((void*)haddr)) {
++      qasan_cpu = ENV_GET_CPU(env);
++      asan_giovese_report_and_crash(ACCESS_TYPE_STORE, addr, 2, PC_GET(env), BP_GET(env), SP_GET(env));
++    }
++#else
++    __asan_store2((void*)haddr);
++#endif
++}
++
++void HELPER(qasan_store4)(CPUArchState *env, target_ulong addr, uint32_t idx)
++{
++    if (qasan_disabled) return;
++    
++    uintptr_t mmu_idx = idx;
++    CPUTLBEntry *entry = tlb_entry(env, mmu_idx, addr);
++    target_ulong tlb_addr = entry->addr_read;
++    uintptr_t haddr;
++
++    /* It is in the TLB, the check is after the real access */
++    if (!tlb_hit(tlb_addr, addr)) return;
++
++    /* Handle an IO access.  */
++    if (unlikely(tlb_addr & ~TARGET_PAGE_MASK))
++        return;
++
++    /* Handle slow unaligned access (it spans two pages or IO).  */
++    if (unlikely((addr & ~TARGET_PAGE_MASK) + 4 - 1
++                    >= TARGET_PAGE_SIZE)) {
++        target_ulong addr1, addr2;
++
++        addr1 = addr & ~(4 - 1);
++        addr2 = addr1 + 4;
++        
++        size_t span = addr2 - addr;
++        haddr = addr + entry->addend;
++        
++        // tlb already processed for first half
++#ifdef ASAN_GIOVESE
++        if (asan_giovese_storeN((void*)haddr, span)) {
++          qasan_cpu = ENV_GET_CPU(env);
++          asan_giovese_report_and_crash(ACCESS_TYPE_STORE, addr, span, PC_GET(env), BP_GET(env), SP_GET(env));
++        }
++#else
++        __asan_storeN((void*)haddr, span);
++#endif
++        
++        qasan_page_storeN(env, addr2, 4 - span, mmu_idx);
++        return;
++    }
++
++    haddr = addr + entry->addend;
++    
++#ifdef ASAN_GIOVESE
++    if (asan_giovese_store4((void*)haddr)) {
++      qasan_cpu = ENV_GET_CPU(env);
++      asan_giovese_report_and_crash(ACCESS_TYPE_STORE, addr, 4, PC_GET(env), BP_GET(env), SP_GET(env));
++    }
++#else
++    __asan_store4((void*)haddr);
++#endif
++}
++
++void HELPER(qasan_store8)(CPUArchState *env, target_ulong addr, uint32_t idx)
++{
++    if (qasan_disabled) return;
++    
++    uintptr_t mmu_idx = idx;
++    CPUTLBEntry *entry = tlb_entry(env, mmu_idx, addr);
++    target_ulong tlb_addr = entry->addr_read;
++    uintptr_t haddr;
++
++    /* It is in the TLB, the check is after the real access */
++    if (!tlb_hit(tlb_addr, addr)) return;
++
++    /* Handle an IO access.  */
++    if (unlikely(tlb_addr & ~TARGET_PAGE_MASK))
++        return;
++
++    /* Handle slow unaligned access (it spans two pages or IO).  */
++    if (unlikely((addr & ~TARGET_PAGE_MASK) + 8 - 1
++                    >= TARGET_PAGE_SIZE)) {
++        target_ulong addr1, addr2;
++
++        addr1 = addr & ~(8 - 1);
++        addr2 = addr1 + 8;
++        
++        size_t span = addr2 - addr;
++        haddr = addr + entry->addend;
++        
++        // tlb already processed for first half
++#ifdef ASAN_GIOVESE
++        if (asan_giovese_storeN((void*)haddr, span)) {
++          qasan_cpu = ENV_GET_CPU(env);
++          asan_giovese_report_and_crash(ACCESS_TYPE_STORE, addr, span, PC_GET(env), BP_GET(env), SP_GET(env));
++        }
++#else
++        __asan_storeN((void*)haddr, span);
++#endif
++        
++        qasan_page_storeN(env, addr2, 8 - span, mmu_idx);
++        return;
++    }
++
++    haddr = addr + entry->addend;
++    
++#ifdef ASAN_GIOVESE
++    if (asan_giovese_store8((void*)haddr)) {
++      qasan_cpu = ENV_GET_CPU(env);
++      asan_giovese_report_and_crash(ACCESS_TYPE_STORE, addr, 8, PC_GET(env), BP_GET(env), SP_GET(env));
++    }
++#else
++    __asan_store8((void*)haddr);
++#endif
++}
++
++#else
++
++//----------------------------------
++// Usermode helpers
++//----------------------------------
++
++void HELPER(qasan_load1)(CPUArchState *env, target_ulong addr) {
++
++  if (qasan_disabled) return;
++  
++  void* ptr = (void*)g2h(addr);
++
++#ifdef ASAN_GIOVESE
++  if (asan_giovese_load1(ptr)) {
++    asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, addr, 1, PC_GET(env), BP_GET(env), SP_GET(env));
++  }
++#else
++  __asan_load1(ptr);
++#endif
++
++}
++
++void HELPER(qasan_load2)(CPUArchState *env, target_ulong addr) {
++
++  if (qasan_disabled) return;
++
++  void* ptr = (void*)g2h(addr);
++
++#ifdef ASAN_GIOVESE
++  if (asan_giovese_load2(ptr)) {
++    asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, addr, 2, PC_GET(env), BP_GET(env), SP_GET(env));
++  }
++#else
++  __asan_load2(ptr);
++#endif
++
++}
++
++void HELPER(qasan_load4)(CPUArchState *env, target_ulong addr) {
++
++  if (qasan_disabled) return;
++  
++  void* ptr = (void*)g2h(addr);
++
++#ifdef ASAN_GIOVESE
++  if (asan_giovese_load4(ptr)) {
++    asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, addr, 4, PC_GET(env), BP_GET(env), SP_GET(env));
++  }
++#else
++  __asan_load4(ptr);
++#endif
++
++}
++
++void HELPER(qasan_load8)(CPUArchState *env, target_ulong addr) {
++
++  if (qasan_disabled) return;
++  
++  void* ptr = (void*)g2h(addr);
++
++#ifdef ASAN_GIOVESE
++  if (asan_giovese_load8(ptr)) {
++    asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, addr, 8, PC_GET(env), BP_GET(env), SP_GET(env));
++  }
++#else
++  __asan_load8(ptr);
++#endif
++
++}
++
++void HELPER(qasan_store1)(CPUArchState *env, target_ulong addr) {
++
++  if (qasan_disabled) return;
++  
++  void* ptr = (void*)g2h(addr);
++
++#ifdef ASAN_GIOVESE
++  if (asan_giovese_store1(ptr)) {
++    asan_giovese_report_and_crash(ACCESS_TYPE_STORE, addr, 1, PC_GET(env), BP_GET(env), SP_GET(env));
++  }
++#else
++  __asan_store1(ptr);
++#endif
++
++}
++
++void HELPER(qasan_store2)(CPUArchState *env, target_ulong addr) {
++
++  if (qasan_disabled) return;
++  
++  void* ptr = (void*)g2h(addr);
++  
++#ifdef ASAN_GIOVESE
++  if (asan_giovese_store2(ptr)) {
++    asan_giovese_report_and_crash(ACCESS_TYPE_STORE, addr, 2, PC_GET(env), BP_GET(env), SP_GET(env));
++  }
++#else
++  __asan_store2(ptr);
++#endif
++
++}
++
++void HELPER(qasan_store4)(CPUArchState *env, target_ulong addr) {
++
++  if (qasan_disabled) return;
++  
++  void* ptr = (void*)g2h(addr);
++
++#ifdef ASAN_GIOVESE
++  if (asan_giovese_store4(ptr)) {
++    asan_giovese_report_and_crash(ACCESS_TYPE_STORE, addr, 4, PC_GET(env), BP_GET(env), SP_GET(env));
++  }
++#else
++  __asan_store4(ptr);
++#endif
++
++}
++
++void HELPER(qasan_store8)(CPUArchState *env, target_ulong addr) {
++
++  if (qasan_disabled) return;
++
++  void* ptr = (void*)g2h(addr);
++
++#ifdef ASAN_GIOVESE
++  if (asan_giovese_store8(ptr)) {
++    asan_giovese_report_and_crash(ACCESS_TYPE_STORE, addr, 8, PC_GET(env), BP_GET(env), SP_GET(env));
++  }
++#else
++  __asan_store8(ptr);
++#endif
++
++}
++
++#endif
+####################################################################
+diff --git a/accel/tcg/tcg-runtime.h b/accel/tcg/tcg-runtime.h
+index 1bd39d13..8587f023 100644
+--- a/accel/tcg/tcg-runtime.h
++++ b/accel/tcg/tcg-runtime.h
+@@ -260,3 +260,28 @@ DEF_HELPER_FLAGS_4(gvec_leu8, TCG_CALL_NO_RWG, void, ptr, ptr, ptr, i32)
+ DEF_HELPER_FLAGS_4(gvec_leu16, TCG_CALL_NO_RWG, void, ptr, ptr, ptr, i32)
+ DEF_HELPER_FLAGS_4(gvec_leu32, TCG_CALL_NO_RWG, void, ptr, ptr, ptr, i32)
+ DEF_HELPER_FLAGS_4(gvec_leu64, TCG_CALL_NO_RWG, void, ptr, ptr, ptr, i32)
++
++DEF_HELPER_FLAGS_5(qasan_fake_instr, TCG_CALL_NO_RWG, ptr, env, ptr, ptr, ptr, ptr)
+# [TODO] qasan_fake_instr：用于插入伪指令，帮助追踪内存访问。
++
++#ifdef CONFIG_USER_ONLY
++DEF_HELPER_FLAGS_2(qasan_load1, TCG_CALL_NO_RWG, void, env, tl)
++DEF_HELPER_FLAGS_2(qasan_load2, TCG_CALL_NO_RWG, void, env, tl)
++DEF_HELPER_FLAGS_2(qasan_load4, TCG_CALL_NO_RWG, void, env, tl)
++DEF_HELPER_FLAGS_2(qasan_load8, TCG_CALL_NO_RWG, void, env, tl)
++DEF_HELPER_FLAGS_2(qasan_store1, TCG_CALL_NO_RWG, void, env, tl)
++DEF_HELPER_FLAGS_2(qasan_store2, TCG_CALL_NO_RWG, void, env, tl)
++DEF_HELPER_FLAGS_2(qasan_store4, TCG_CALL_NO_RWG, void, env, tl)
++DEF_HELPER_FLAGS_2(qasan_store8, TCG_CALL_NO_RWG, void, env, tl)
++#else
++DEF_HELPER_FLAGS_3(qasan_load1, TCG_CALL_NO_RWG, void, env, tl, i32)
++DEF_HELPER_FLAGS_3(qasan_load2, TCG_CALL_NO_RWG, void, env, tl, i32)
++DEF_HELPER_FLAGS_3(qasan_load4, TCG_CALL_NO_RWG, void, env, tl, i32)
++DEF_HELPER_FLAGS_3(qasan_load8, TCG_CALL_NO_RWG, void, env, tl, i32)
++DEF_HELPER_FLAGS_3(qasan_store1, TCG_CALL_NO_RWG, void, env, tl, i32)
++DEF_HELPER_FLAGS_3(qasan_store2, TCG_CALL_NO_RWG, void, env, tl, i32)
++DEF_HELPER_FLAGS_3(qasan_store4, TCG_CALL_NO_RWG, void, env, tl, i32)
++DEF_HELPER_FLAGS_3(qasan_store8, TCG_CALL_NO_RWG, void, env, tl, i32)
++#endif
+# 
++
++DEF_HELPER_FLAGS_1(qasan_shadow_stack_push, TCG_CALL_NO_RWG, void, tl)
++DEF_HELPER_FLAGS_1(qasan_shadow_stack_pop, TCG_CALL_NO_RWG, void, tl)
+
+
+####################################################################
+diff --git a/accel/tcg/translate-all.c b/accel/tcg/translate-all.c
+index 639f0b27..ed430f60 100644
+--- a/accel/tcg/translate-all.c
++++ b/accel/tcg/translate-all.c
+@@ -59,6 +59,8 @@
+ #include "exec/log.h"
+ #include "sysemu/cpus.h"
+ 
++#include "../afl/afl-qemu-translate-inl.h"
++
+ /* #define DEBUG_TB_INVALIDATE */
+ /* #define DEBUG_TB_FLUSH */
+ /* make various TB consistency checks */
+@@ -1721,6 +1723,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
+     tcg_func_start(tcg_ctx);
+ 
+     tcg_ctx->cpu = ENV_GET_CPU(env);
++    afl_gen_trace(pc);
+     gen_intermediate_code(cpu, tb);
+     tcg_ctx->cpu = NULL;
+####################################################################
+diff --git a/accel/tcg/user-exec.c b/accel/tcg/user-exec.c
+index cd75829c..9db07eda 100644
+--- a/accel/tcg/user-exec.c
++++ b/accel/tcg/user-exec.c
+@@ -40,6 +40,7 @@
+ #include <sys/ucontext.h>
+ #endif
+ 
++#include "../../../afl/config.h"
+ __thread uintptr_t helper_retaddr;
+ 
+ //#define DEBUG_SIGNAL
+@@ -97,7 +98,8 @@ static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
+     if (!cpu || !cpu->running) {
+         printf("qemu:%s received signal outside vCPU context @ pc=0x%"
+                PRIxPTR "\n",  __func__, pc);
+-        abort();
++        //abort();
++        _exit(MSAN_ERROR);
+     }
+ 
+ #if defined(DEBUG_SIGNAL)
+
+####################################################################
+diff --git a/bsd-user/syscall.c b/bsd-user/syscall.c
+index 66492aaf..3c5b0439 100644
+--- a/bsd-user/syscall.c
++++ b/bsd-user/syscall.c
+@@ -27,6 +27,8 @@
+ #include "qemu.h"
+ #include "qemu-common.h"
+ 
++#include "qasan-qemu.h"
++
+ //#define DEBUG
+ 
+ static abi_ulong target_brk;
+@@ -392,6 +394,11 @@ abi_long do_freebsd_syscall(void *cpu_env, int num, abi_long arg1,
+     case TARGET_FREEBSD_NR___syscall:
+         ret = do_freebsd_syscall(cpu_env,arg1 & 0xffff,arg2,arg3,arg4,arg5,arg6,arg7,arg8,0);
+         break;
++        
++    case QASAN_FAKESYS_NR:
++        /* QASAN syscall */
++        return qasan_actions_dispatcher(cpu_env, arg1, arg2, arg3, arg4);
++
+     default:
+         ret = get_errno(syscall(num, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8));
+         break;
+@@ -467,6 +474,11 @@ abi_long do_netbsd_syscall(void *cpu_env, int num, abi_long arg1,
+     case TARGET_NETBSD_NR___syscall:
+         ret = do_netbsd_syscall(cpu_env,arg1 & 0xffff,arg2,arg3,arg4,arg5,arg6,0);
+         break;
++
++    case QASAN_FAKESYS_NR:
++        /* QASAN syscall */
++        return qasan_actions_dispatcher(cpu_env, arg1, arg2, arg3, arg4);
++        
+     default:
+         ret = syscall(num, arg1, arg2, arg3, arg4, arg5, arg6);
+         break;
+@@ -542,6 +554,11 @@ abi_long do_openbsd_syscall(void *cpu_env, int num, abi_long arg1,
+     case TARGET_OPENBSD_NR___syscall:
+         ret = do_openbsd_syscall(cpu_env,arg1 & 0xffff,arg2,arg3,arg4,arg5,arg6,0);
+         break;
++
++    case QASAN_FAKESYS_NR:
++        /* QASAN syscall */
++        return qasan_actions_dispatcher(cpu_env, arg1, arg2, arg3, arg4);
++
+     default:
+         ret = syscall(num, arg1, arg2, arg3, arg4, arg5, arg6);
+         break;
+####################################################################
+diff --git a/changes.patch b/changes.patch
+new file mode 100644
+index 00000000..e69de29b
+####################################################################
+diff --git a/exec.c b/exec.c
+index df5571eb..4e2ccf76 100644
+--- a/exec.c
++++ b/exec.c
+@@ -3351,6 +3351,59 @@ MemTxResult address_space_read_full(AddressSpace *as, hwaddr addr,
+     return result;
+ }
+ 
++hwaddr qasan_addr_to_phys(CPUState* cpu, target_ulong addr) {
++
++    MemTxAttrs attrs;
++
++    target_ulong page = addr & TARGET_PAGE_MASK;
++    hwaddr phys_addr = cpu_get_phys_page_attrs_debug(cpu, page, &attrs);
++    /* if no physical page mapped, return an error */
++    if (phys_addr == -1)
++        return -1;
++    phys_addr += (addr & ~TARGET_PAGE_MASK);
++    return phys_addr;
++
++}
++
++int qasan_addr_to_host(CPUState* cpu, target_ulong addr, void** host_addr) {
++
++    MemTxAttrs attrs;
++
++    target_ulong page = addr & TARGET_PAGE_MASK;
++    hwaddr phys_addr = cpu_get_phys_page_attrs_debug(cpu, page, &attrs);
++    int asidx = cpu_asidx_from_attrs(cpu, attrs);
++    /* if no physical page mapped, return an error */
++    if (phys_addr == -1)
++        return 0;
++    phys_addr += (addr & ~TARGET_PAGE_MASK);
++
++    // fprintf(stderr, "%p -> %p\n", addr, phys_addr);
++
++    FlatView *fv;
++    AddressSpace *as = cpu->cpu_ases[asidx].as;
++
++    hwaddr l;
++    hwaddr addr1;
++    MemoryRegion *mr;
++
++    rcu_read_lock();
++    fv = address_space_to_flatview(as);
++    mr = flatview_translate(fv, phys_addr, &addr1, &l, false, attrs);
++
++    if (!memory_access_is_direct(mr, false)) {
++        /* I/O case */
++        rcu_read_unlock();
++        return 0;
++    } else {
++        /* RAM case */
++        *host_addr = qemu_map_ram_ptr(mr->ram_block, addr1);
++    }
++
++    rcu_read_unlock();
++
++    return 1;
++}
++
+ MemTxResult address_space_write(AddressSpace *as, hwaddr addr,
+                                 MemTxAttrs attrs,
+                                 const uint8_t *buf, int len)
+####################################################################
+diff --git a/fpu/softfloat.c b/fpu/softfloat.c
+index e1eef954..7553b86e 100644
+--- a/fpu/softfloat.c
++++ b/fpu/softfloat.c
+@@ -7205,3 +7205,5 @@ float128 float128_scalbn(float128 a, int n, float_status *status)
+                                          , status);
+ 
+ }
++
++#include "../../afl/afl-qemu-floats.h"
+####################################################################
+diff --git a/linux-user/elfload.c b/linux-user/elfload.c
+index 5bccd2e2..af709707 100644
+--- a/linux-user/elfload.c
++++ b/linux-user/elfload.c
+@@ -20,6 +20,8 @@
+ 
+ #define ELF_OSABI   ELFOSABI_SYSV
+ 
++extern abi_ulong afl_entry_point, afl_start_code, afl_end_code;
++
+ /* from personality.h */
+ 
+ /*
+@@ -2129,7 +2131,7 @@ unsigned long init_guest_space(unsigned long host_start,
+             return (unsigned long)-1;
+         }
+     }
+-
++    
+     qemu_log_mask(CPU_LOG_PAGE, "Reserved 0x%lx bytes of guest address space\n", host_size);
+ 
+     return aligned_start;
+@@ -2301,6 +2303,21 @@ static void load_elf_image(const char *image_name, int image_fd,
+     info->brk = 0;
+     info->elf_flags = ehdr->e_flags;
+ 
++    if (!afl_entry_point) {
++      char *ptr;
++      if ((ptr = getenv("AFL_ENTRYPOINT")) != NULL) {
++        afl_entry_point = strtoul(ptr, NULL, 16);
++      } else {
++        afl_entry_point = info->entry;
++      }
++#ifdef TARGET_ARM
++      /* The least significant bit indicates Thumb mode. */
++      afl_entry_point = afl_entry_point & ~(target_ulong)1;
++#endif
++    }
++    if (getenv("AFL_DEBUG") != NULL)
++      fprintf(stderr, "AFL forkserver entrypoint: %p\n", (void*)afl_entry_point);
++
+     for (i = 0; i < ehdr->e_phnum; i++) {
+         struct elf_phdr *eppnt = phdr + i;
+         if (eppnt->p_type == PT_LOAD) {
+@@ -2335,9 +2352,11 @@ static void load_elf_image(const char *image_name, int image_fd,
+             if (elf_prot & PROT_EXEC) {
+                 if (vaddr < info->start_code) {
+                     info->start_code = vaddr;
++                    if (!afl_start_code) afl_start_code = vaddr;
+                 }
+                 if (vaddr_ef > info->end_code) {
+                     info->end_code = vaddr_ef;
++                    if (!afl_end_code) afl_end_code = vaddr_ef;
+                 }
+             }
+             if (elf_prot & PROT_WRITE) {
+@@ -2662,6 +2681,22 @@ int load_elf_binary(struct linux_binprm *bprm, struct image_info *info)
+        change some of these later */
+     bprm->p = setup_arg_pages(bprm, info);
+ 
++    // On PowerPC64 the entry point is the _function descriptor_
++    // of the entry function. For AFL to properly initialize,
++    // afl_entry_point needs to be set to the actual first instruction
++    // as opposed executed by the target program. This as opposed to 
++    // where the function's descriptor sits in memory.
++    // copied from PPC init_thread
++#if defined(TARGET_PPC64) && !defined(TARGET_ABI32)
++    if (get_ppc64_abi(infop) < 2) {
++        uint64_t val;
++        get_user_u64(val, infop->entry + 8);
++        _regs->gpr[2] = val + infop->load_bias;
++        get_user_u64(val, infop->entry);
++        infop->entry = val + infop->load_bias;
++    }
++#endif
++
+     scratch = g_new0(char, TARGET_PAGE_SIZE);
+     if (STACK_GROWS_DOWN) {
+         bprm->p = copy_elf_strings(1, &bprm->filename, scratch,
+####################################################################
+diff --git a/linux-user/main.c b/linux-user/main.c
+index 923cbb75..28fc9d4c 100644
+--- a/linux-user/main.c
++++ b/linux-user/main.c
+@@ -38,6 +38,8 @@
+ #include "target_elf.h"
+ #include "cpu_loop-common.h"
+ 
++#include "qasan-qemu.h"
++
+ char *exec_path;
+ 
+ int singlestep;
+@@ -600,6 +602,15 @@ int main(int argc, char **argv, char **envp)
+     int ret;
+     int execfd;
+ 
++    if (getenv("QASAN_MAX_CALL_STACK"))
++      qasan_max_call_stack = atoi(getenv("QASAN_MAX_CALL_STACK"));
++    if (getenv("QASAN_SYMBOLIZE"))
++      qasan_symbolize = atoi(getenv("QASAN_SYMBOLIZE"));
++
++#ifdef ASAN_GIOVESE
++    asan_giovese_init();
++#endif
++
+     module_call_init(MODULE_INIT_TRACE);
+     qemu_init_cpu_list();
+     module_call_init(MODULE_INIT_QOM);
+####################################################################
+diff --git a/linux-user/signal.c b/linux-user/signal.c
+index 602b631b..4372f17c 100644
+--- a/linux-user/signal.c
++++ b/linux-user/signal.c
+@@ -26,6 +26,8 @@
+ #include "trace.h"
+ #include "signal-common.h"
+ 
++#include "qasan-qemu.h"
++
+ struct target_sigaltstack target_sigaltstack_used = {
+     .ss_sp = 0,
+     .ss_size = 0,
+@@ -603,6 +605,8 @@ static void QEMU_NORETURN dump_core_and_abort(int target_sig)
+     act.sa_flags = 0;
+     sigaction(host_sig, &act, NULL);
+ 
++    
++
+     /* For some reason raise(host_sig) doesn't send the signal when
+      * statically linked on x86-64. */
+     kill(getpid(), host_sig);
+@@ -861,7 +865,9 @@ static void handle_pending_signal(CPUArchState *cpu_env, int sig,
+         print_taken_signal(sig, &k->info);
+     }
+ 
+-    if (handler == TARGET_SIG_DFL) {
++    int ignore_handling = !!getenv("AFL_QEMU_FORCE_DFL");
++
++    if (handler == TARGET_SIG_DFL || ignore_handling) {
+         /* default handler : ignore some signal. The other are job control or fatal */
+         if (sig == TARGET_SIGTSTP || sig == TARGET_SIGTTIN || sig == TARGET_SIGTTOU) {
+             kill(getpid(),SIGSTOP);
+@@ -869,11 +875,45 @@ static void handle_pending_signal(CPUArchState *cpu_env, int sig,
+                    sig != TARGET_SIGURG &&
+                    sig != TARGET_SIGWINCH &&
+                    sig != TARGET_SIGCONT) {
++            
++#ifdef ASAN_GIOVESE
++            if (sig == TARGET_SIGILL ||
++                sig != TARGET_SIGFPE ||
++                sig != TARGET_SIGSEGV ||
++                sig != TARGET_SIGBUS)
++              asan_giovese_deadly_signal(target_to_host_signal(sig),
++                                         k->info._sifields._sigfault._addr,
++                                         PC_GET(cpu_env), BP_GET(cpu_env),
++                                         SP_GET(cpu_env));
++            else
++              asan_giovese_deadly_signal(target_to_host_signal(sig),
++                                         PC_GET(cpu_env),
++                                         PC_GET(cpu_env), BP_GET(cpu_env),
++                                         SP_GET(cpu_env));
++#endif
++
+             dump_core_and_abort(sig);
+         }
+     } else if (handler == TARGET_SIG_IGN) {
+         /* ignore sig */
+     } else if (handler == TARGET_SIG_ERR) {
++
++#ifdef ASAN_GIOVESE
++      if (sig == TARGET_SIGILL ||
++          sig != TARGET_SIGFPE ||
++          sig != TARGET_SIGSEGV ||
++          sig != TARGET_SIGBUS)
++        asan_giovese_deadly_signal(target_to_host_signal(sig),
++                                   k->info._sifields._sigfault._addr,
++                                   PC_GET(cpu_env), BP_GET(cpu_env),
++                                   SP_GET(cpu_env));
++      else
++        asan_giovese_deadly_signal(target_to_host_signal(sig),
++                                   PC_GET(cpu_env),
++                                   PC_GET(cpu_env), BP_GET(cpu_env),
++                                   SP_GET(cpu_env));
++#endif
++
+         dump_core_and_abort(sig);
+     } else {
+         /* compute the blocked signals during the handler execution */
+####################################################################
+diff --git a/linux-user/syscall.c b/linux-user/syscall.c
+index cc5440ad..13f2ffd0 100644
+--- a/linux-user/syscall.c
++++ b/linux-user/syscall.c
+@@ -255,7 +255,8 @@ static type name (type1 arg1,type2 arg2,type3 arg3,type4 arg4,type5 arg5,	\
+ #endif
+ 
+ #ifdef __NR_gettid
+-_syscall0(int, gettid)
++#define __NR_sys_gettid __NR_gettid
++_syscall0(int, sys_gettid)
+# gettid 是用户态的接口，程序通过调用它来获取线程 ID。
+# sys_gettid 是内核态的实现，处理来自用户态的 gettid 系统调用请求。
+ #else
+ /* This is a replacement for the host gettid() and must return a host
+    errno. */
+@@ -5389,7 +5390,7 @@ static void *clone_func(void *arg)
+     cpu = ENV_GET_CPU(env);
+     thread_cpu = cpu;
+     ts = (TaskState *)cpu->opaque;
+-    info->tid = gettid();
++    info->tid = sys_gettid();
+     task_settid(ts);
+     if (info->child_tidptr)
+         put_user_u32(info->tid, info->child_tidptr);
+@@ -5534,9 +5535,9 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
+                mapping.  We can't repeat the spinlock hack used above because
+                the child process gets its own copy of the lock.  */
+             if (flags & CLONE_CHILD_SETTID)
+-                put_user_u32(gettid(), child_tidptr);
++                put_user_u32(sys_gettid(), child_tidptr);
+             if (flags & CLONE_PARENT_SETTID)
+-                put_user_u32(gettid(), parent_tidptr);
++                put_user_u32(sys_gettid(), parent_tidptr);
+             ts = (TaskState *)cpu->opaque;
+             if (flags & CLONE_SETTLS)
+                 cpu_set_tls (env, newtls);
+# 在 do_syscall1 函数中，增加了一个 QASAN 特定的处理逻辑：
+#       如果环境变量 QASAN_PRESERVE_EXECVE 未设置，
+#       则检查 LD_PRELOAD 是否包含 libqasan.so，
+#       如果包含，则将其移除。
+@@ -7137,6 +7138,15 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+                     return -TARGET_EFAULT;
+                 if (!addr)
+                     break;
++                // QASAN: remove preloaded library
++                if (!getenv("QASAN_PRESERVE_EXECVE")) {
++                  if (!strncmp("LD_PRELOAD=", (char *)addr, 11)) {
++                    char* data = (char *)addr + 11;
++                    char* have_qasan = strstr(data, "libqasan.so");
++                    if (have_qasan)
++                      *data = 0;
++                  }
++                }
+                 envc++;
+             }
+
+# 在处理 stime 系统调用时，为了确保在不同版本的 GNU C 库（glibc）中兼容，使用了条件编译：
+# 对于 glibc 版本 2.30 及以上，使用 clock_settime 来设置系统时间。
+# 对于较低版本的 glibc，继续使用 stime。
+@@ -7332,8 +7342,19 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+             time_t host_time;
+             if (get_user_sal(host_time, arg1))
+                 return -TARGET_EFAULT;
+-            return get_errno(stime(&host_time));
++   #if defined(__GNU_LIBRARY__)
++      #if (__GLIBC__ >=2) && (__GLIBC_MINOR__ > 30)
++            struct timespec ts = {};
++            ts.tv_sec = host_time;
++            ret = get_errno(clock_settime(CLOCK_REALTIME, &ts));
++      #else
++            ret = get_errno(stime(&host_time));
++      #endif
++   #else
++            ret = get_errno(stime(&host_time));
++   #endif
+         }
++        break;
+ #endif
+ #ifdef TARGET_NR_alarm /* not on alpha */
+     case TARGET_NR_alarm:
+@@ -10534,7 +10555,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+         return TARGET_PAGE_SIZE;
+ #endif
+     case TARGET_NR_gettid:
+-        return get_errno(gettid());
++        return get_errno(sys_gettid());
+ #ifdef TARGET_NR_readahead
+     case TARGET_NR_readahead:
+ #if TARGET_ABI_BITS == 32
+@@ -10818,8 +10839,19 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+         return get_errno(safe_tkill((int)arg1, target_to_host_signal(arg2)));
+ 
+     case TARGET_NR_tgkill:
+-        return get_errno(safe_tgkill((int)arg1, (int)arg2,
+-                         target_to_host_signal(arg3)));
++        {
++          int pid  = (int)arg1,
++              tgid = (int)arg2,
++              sig  = (int)arg3;
++
++          /* Not entirely sure if the below is correct for all architectures. */
++
++          if(afl_forksrv_pid && afl_forksrv_pid == pid && sig == SIGABRT)
++              pid = tgid = getpid();
++
++          ret = get_errno(safe_tgkill(pid, tgid, target_to_host_signal(sig)));
++
++        }
+ 
+ #ifdef TARGET_NR_set_robust_list
+     case TARGET_NR_set_robust_list:
+@@ -11492,6 +11524,10 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+         return do_swapcontext(cpu_env, arg1, arg2, arg3);
+ #endif
+ 
++    case QASAN_FAKESYS_NR:
++        /* QASAN syscall */
++        return qasan_actions_dispatcher(cpu_env, arg1, arg2, arg3, arg4);
++
+     default:
+         qemu_log_mask(LOG_UNIMP, "Unsupported syscall: %d\n", num);
+         return -TARGET_ENOSYS;
+
+####################################################################
+diff --git a/target/arm/translate-a64.c b/target/arm/translate-a64.c
+index fd36425f..39bf3d75 100644
+--- a/target/arm/translate-a64.c
++++ b/target/arm/translate-a64.c
+@@ -39,6 +39,8 @@
+ #include "translate-a64.h"
+ #include "qemu/atomic128.h"
+ 
++#include "../afl/afl-qemu-cpu-translate-inl.h"
++
+ static TCGv_i64 cpu_X[32];
+ static TCGv_i64 cpu_pc;
+ 
+@@ -1363,6 +1365,8 @@ static void disas_uncond_b_imm(DisasContext *s, uint32_t insn)
+ 
+     if (insn & (1U << 31)) {
+         /* BL Branch with link */
++        if (qasan_max_call_stack)
++          gen_helper_qasan_shadow_stack_push(tcg_const_ptr(s->pc));
+         tcg_gen_movi_i64(cpu_reg(s, 30), s->pc);
+     }
+ 
+@@ -1928,6 +1932,10 @@ static void disas_uncond_b_reg(DisasContext *s, uint32_t insn)
+     case 0: /* BR */
+     case 1: /* BLR */
+     case 2: /* RET */
++        if (opc == 2 && rn == 30 && qasan_max_call_stack)
++          gen_helper_qasan_shadow_stack_pop(cpu_reg(s, 30));
++        else if (opc == 1 && qasan_max_call_stack)
++          gen_helper_qasan_shadow_stack_push(tcg_const_ptr(s->pc));
+         gen_a64_set_pc(s, cpu_reg(s, rn));
+         /* BLR also needs to load return address */
+         if (opc == 1) {
+####################################################################
+diff --git a/target/arm/translate.c b/target/arm/translate.c
+index 7c4675ff..915a12c1 100644
+--- a/target/arm/translate.c
++++ b/target/arm/translate.c
+@@ -59,6 +59,8 @@
+ #define IS_USER(s) (s->user)
+ #endif
+ 
++#include "../afl/afl-qemu-cpu-translate-inl.h"
++
+ /* We reuse the same 64-bit temporaries for efficiency.  */
+ static TCGv_i64 cpu_V0, cpu_V1, cpu_M0;
+ static TCGv_i32 cpu_R[16];
+@@ -9122,6 +9124,8 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
+             gen_rfe(s, tmp, tmp2);
+             return;
+         } else if ((insn & 0x0e000000) == 0x0a000000) {
++            if (qasan_max_call_stack)
++              gen_helper_qasan_shadow_stack_push(tcg_const_ptr(s->pc));
+             /* branch link and change to thumb (blx <offset>) */
+             int32_t offset;
+ 
+@@ -9283,6 +9287,8 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
+                 /* branch/exchange thumb (bx).  */
+                 ARCH(4T);
+                 tmp = load_reg(s, rm);
++                if (rm == 14 && qasan_max_call_stack)
++                  gen_helper_qasan_shadow_stack_pop(tmp);
+                 gen_bx(s, tmp);
+             } else if (op1 == 3) {
+                 /* clz */
+@@ -9300,6 +9306,8 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
+                 ARCH(5J); /* bxj */
+                 /* Trivial implementation equivalent to bx.  */
+                 tmp = load_reg(s, rm);
++                if (rm == 14 && qasan_max_call_stack)
++                  gen_helper_qasan_shadow_stack_pop(tmp);
+                 gen_bx(s, tmp);
+             } else {
+                 goto illegal_op;
+@@ -9311,6 +9319,8 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
+ 
+             ARCH(5);
+             /* branch link/exchange thumb (blx) */
++            if (qasan_max_call_stack)
++              gen_helper_qasan_shadow_stack_push(tcg_const_ptr(s->pc));
+             tmp = load_reg(s, rm);
+             tmp2 = tcg_temp_new_i32();
+             tcg_gen_movi_i32(tmp2, s->pc);
+@@ -9521,6 +9531,8 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
+             if (logic_cc) {
+                 gen_logic_CC(tmp);
+             }
++            if (rd == 15 && rn == 14 && qasan_max_call_stack)
++              gen_helper_qasan_shadow_stack_pop(tmp);
+             store_reg_bx(s, rd, tmp);
+             break;
+         case 0x01:
+@@ -9528,6 +9540,8 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
+             if (logic_cc) {
+                 gen_logic_CC(tmp);
+             }
++            if (rd == 15 && rn == 14 && qasan_max_call_stack)
++              gen_helper_qasan_shadow_stack_pop(tmp);
+             store_reg_bx(s, rd, tmp);
+             break;
+         case 0x02:
+@@ -9541,18 +9555,24 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
+             } else {
+                 if (set_cc) {
+                     gen_sub_CC(tmp, tmp, tmp2);
++                    afl_gen_compcov(s->pc, tmp, tmp2, MO_32, insn & (1 << 25));
+                 } else {
+                     tcg_gen_sub_i32(tmp, tmp, tmp2);
+                 }
++                if (rd == 15 && rn == 14 && qasan_max_call_stack)
++                  gen_helper_qasan_shadow_stack_pop(tmp);
+                 store_reg_bx(s, rd, tmp);
+             }
+             break;
+         case 0x03:
+             if (set_cc) {
+                 gen_sub_CC(tmp, tmp2, tmp);
++                afl_gen_compcov(s->pc, tmp, tmp2, MO_32, insn & (1 << 25));
+             } else {
+                 tcg_gen_sub_i32(tmp, tmp2, tmp);
+             }
++            if (rd == 15 && rn == 14 && qasan_max_call_stack)
++              gen_helper_qasan_shadow_stack_pop(tmp);
+             store_reg_bx(s, rd, tmp);
+             break;
+         case 0x04:
+@@ -9561,6 +9581,8 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
+             } else {
+                 tcg_gen_add_i32(tmp, tmp, tmp2);
+             }
++            if (rd == 15 && rn == 14 && qasan_max_call_stack)
++              gen_helper_qasan_shadow_stack_pop(tmp);
+             store_reg_bx(s, rd, tmp);
+             break;
+         case 0x05:
+@@ -9569,6 +9591,8 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
+             } else {
+                 gen_add_carry(tmp, tmp, tmp2);
+             }
++            if (rd == 15 && rn == 14 && qasan_max_call_stack)
++              gen_helper_qasan_shadow_stack_pop(tmp);
+             store_reg_bx(s, rd, tmp);
+             break;
+         case 0x06:
+@@ -9577,6 +9601,8 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
+             } else {
+                 gen_sub_carry(tmp, tmp, tmp2);
+             }
++            if (rd == 15 && rn == 14 && qasan_max_call_stack)
++              gen_helper_qasan_shadow_stack_pop(tmp);
+             store_reg_bx(s, rd, tmp);
+             break;
+         case 0x07:
+@@ -9585,6 +9611,8 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
+             } else {
+                 gen_sub_carry(tmp, tmp2, tmp);
+             }
++            if (rd == 15 && rn == 14 && qasan_max_call_stack)
++              gen_helper_qasan_shadow_stack_pop(tmp);
+             store_reg_bx(s, rd, tmp);
+             break;
+         case 0x08:
+@@ -9604,6 +9632,7 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
+         case 0x0a:
+             if (set_cc) {
+                 gen_sub_CC(tmp, tmp, tmp2);
++                afl_gen_compcov(s->pc, tmp, tmp2, MO_32, insn & (1 << 25));
+             }
+             tcg_temp_free_i32(tmp);
+             break;
+@@ -9618,6 +9647,8 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
+             if (logic_cc) {
+                 gen_logic_CC(tmp);
+             }
++            if (rd == 15 && rn == 14 && qasan_max_call_stack)
++              gen_helper_qasan_shadow_stack_pop(tmp);
+             store_reg_bx(s, rd, tmp);
+             break;
+         case 0x0d:
+@@ -9639,6 +9670,8 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
+             if (logic_cc) {
+                 gen_logic_CC(tmp);
+             }
++            if (rd == 15 && rn == 14 && qasan_max_call_stack)
++              gen_helper_qasan_shadow_stack_pop(tmp);
+             store_reg_bx(s, rd, tmp);
+             break;
+         default:
+@@ -10327,6 +10360,8 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
+             }
+             if (insn & (1 << 20)) {
+                 /* Complete the load.  */
++                //if (rd == 15 && rn == 13 && qasan_max_call_stack)
++                //  gen_helper_qasan_shadow_stack_pop(tmp);
+                 store_reg_from_load(s, rd, tmp);
+             }
+             break;
+@@ -10398,6 +10433,8 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
+                             } else if (rn == 15 && exc_return) {
+                                 store_pc_exc_ret(s, tmp);
+                             } else {
++                                if (i == 15 && qasan_max_call_stack)
++                                  gen_helper_qasan_shadow_stack_pop(tmp);
+                                 store_reg_from_load(s, i, tmp);
+                             }
+                         } else {
+@@ -10565,7 +10602,7 @@ thumb2_logic_op(int op)
+ 
+ static int
+ gen_thumb2_data_op(DisasContext *s, int op, int conds, uint32_t shifter_out,
+-                   TCGv_i32 t0, TCGv_i32 t1)
++                   TCGv_i32 t0, TCGv_i32 t1, int has_imm)
+ {
+     int logic_cc;
+ 
+@@ -10611,15 +10648,17 @@ gen_thumb2_data_op(DisasContext *s, int op, int conds, uint32_t shifter_out,
+         }
+         break;
+     case 13: /* sub */
+-        if (conds)
++        if (conds) {
+             gen_sub_CC(t0, t0, t1);
+-        else
++            afl_gen_compcov(s->pc, t0, t1, MO_32, has_imm);
++        } else
+             tcg_gen_sub_i32(t0, t0, t1);
+         break;
+     case 14: /* rsb */
+-        if (conds)
++        if (conds) {
+             gen_sub_CC(t0, t1, t0);
+-        else
++            afl_gen_compcov(s->pc, t0, t1, MO_32, has_imm);
++        } else
+             tcg_gen_sub_i32(t0, t1, t0);
+         break;
+     default: /* 5, 6, 7, 9, 12, 15. */
+@@ -11085,7 +11124,7 @@ static void disas_thumb2_insn(DisasContext *s, uint32_t insn)
+             conds = (insn & (1 << 20)) != 0;
+             logic_cc = (conds && thumb2_logic_op(op));
+             gen_arm_shift_im(tmp2, shiftop, shift, logic_cc);
+-            if (gen_thumb2_data_op(s, op, conds, 0, tmp, tmp2))
++            if (gen_thumb2_data_op(s, op, conds, 0, tmp, tmp2, insn & (1 << 10)))
+                 goto illegal_op;
+             tcg_temp_free_i32(tmp2);
+             if (rd == 13 &&
+@@ -11545,6 +11584,8 @@ static void disas_thumb2_insn(DisasContext *s, uint32_t insn)
+                 offset ^= ((~insn) & (1 << 11)) << 11;
+ 
+                 if (insn & (1 << 14)) {
++                    if (qasan_max_call_stack)
++                      gen_helper_qasan_shadow_stack_push(tcg_const_ptr(s->pc));
+                     /* Branch and link.  */
+                     tcg_gen_movi_i32(cpu_R[14], s->pc | 1);
+                 }
+@@ -11683,6 +11724,8 @@ static void disas_thumb2_insn(DisasContext *s, uint32_t insn)
+                             goto illegal_op;
+                         }
+                         tmp = load_reg(s, rn);
++                        if (rm == 14 && qasan_max_call_stack)
++                          gen_helper_qasan_shadow_stack_pop(tmp);
+                         gen_bx(s, tmp);
+                         break;
+                     case 5: /* Exception return.  */
+@@ -11955,7 +11998,7 @@ static void disas_thumb2_insn(DisasContext *s, uint32_t insn)
+                 }
+                 op = (insn >> 21) & 0xf;
+                 if (gen_thumb2_data_op(s, op, (insn & (1 << 20)) != 0,
+-                                       shifter_out, tmp, tmp2))
++                                       shifter_out, tmp, tmp2, insn & (1 << 10)))
+                     goto illegal_op;
+                 tcg_temp_free_i32(tmp2);
+                 rd = (insn >> 8) & 0xf;
+@@ -12206,8 +12249,10 @@ static void disas_thumb_insn(DisasContext *s, uint32_t insn)
+             if (insn & (1 << 9)) {
+                 if (s->condexec_mask)
+                     tcg_gen_sub_i32(tmp, tmp, tmp2);
+-                else
++                else {
+                     gen_sub_CC(tmp, tmp, tmp2);
++                    afl_gen_compcov(s->pc, tmp, tmp2, MO_32, insn & (1 << 10));
++                }
+             } else {
+                 if (s->condexec_mask)
+                     tcg_gen_add_i32(tmp, tmp, tmp2);
+@@ -12247,6 +12292,7 @@ static void disas_thumb_insn(DisasContext *s, uint32_t insn)
+             switch (op) {
+             case 1: /* cmp */
+                 gen_sub_CC(tmp, tmp, tmp2);
++                afl_gen_compcov(s->pc, tmp, tmp2, MO_32, 1);
+                 tcg_temp_free_i32(tmp);
+                 tcg_temp_free_i32(tmp2);
+                 break;
+@@ -12261,8 +12307,10 @@ static void disas_thumb_insn(DisasContext *s, uint32_t insn)
+             case 3: /* sub */
+                 if (s->condexec_mask)
+                     tcg_gen_sub_i32(tmp, tmp, tmp2);
+-                else
++                else {
+                     gen_sub_CC(tmp, tmp, tmp2);
++                    afl_gen_compcov(s->pc, tmp, tmp2, MO_32, 1);
++                }
+                 tcg_temp_free_i32(tmp2);
+                 store_reg(s, rd, tmp);
+                 break;
+@@ -12308,6 +12356,7 @@ static void disas_thumb_insn(DisasContext *s, uint32_t insn)
+                 tmp = load_reg(s, rd);
+                 tmp2 = load_reg(s, rm);
+                 gen_sub_CC(tmp, tmp, tmp2);
++                afl_gen_compcov(s->pc, tmp, tmp2, MO_32, 0);
+                 tcg_temp_free_i32(tmp2);
+                 tcg_temp_free_i32(tmp);
+                 break;
+@@ -12317,6 +12366,8 @@ static void disas_thumb_insn(DisasContext *s, uint32_t insn)
+                     /* MOV SP, reg */
+                     store_sp_checked(s, tmp);
+                 } else {
++                    if (rd == 15 && rm == 14 && qasan_max_call_stack)
++                      gen_helper_qasan_shadow_stack_pop(tmp);
+                     store_reg(s, rd, tmp);
+                 }
+                 break;
+@@ -12353,6 +12404,8 @@ static void disas_thumb_insn(DisasContext *s, uint32_t insn)
+                 /* BLX/BX */
+                 tmp = load_reg(s, rm);
+                 if (link) {
++                    if (qasan_max_call_stack)
++                      gen_helper_qasan_shadow_stack_push(tcg_const_ptr(s->pc));
+                     val = (uint32_t)s->pc | 1;
+                     tmp2 = tcg_temp_new_i32();
+                     tcg_gen_movi_i32(tmp2, val);
+@@ -12360,6 +12413,8 @@ static void disas_thumb_insn(DisasContext *s, uint32_t insn)
+                     gen_bx(s, tmp);
+                 } else {
+                     /* Only BX works as exception-return, not BLX */
++                    if (rm == 14 && qasan_max_call_stack)
++                      gen_helper_qasan_shadow_stack_pop(tmp);
+                     gen_bx_excret(s, tmp);
+                 }
+                 break;
+@@ -12466,6 +12521,7 @@ static void disas_thumb_insn(DisasContext *s, uint32_t insn)
+             break;
+         case 0xa: /* cmp */
+             gen_sub_CC(tmp, tmp, tmp2);
++            afl_gen_compcov(s->pc, tmp, tmp2, MO_32, 0);
+             rd = 16;
+             break;
+         case 0xb: /* cmn */
+@@ -12766,6 +12822,8 @@ static void disas_thumb_insn(DisasContext *s, uint32_t insn)
+             store_reg(s, 13, addr);
+             /* set the new PC value */
+             if ((insn & 0x0900) == 0x0900) {
++                if (qasan_max_call_stack)
++                  gen_helper_qasan_shadow_stack_pop(tmp);
+                 store_reg_from_load(s, 15, tmp);
+             }
+             break;
+@@ -12958,6 +13016,9 @@ static void disas_thumb_insn(DisasContext *s, uint32_t insn)
+             tcg_gen_addi_i32(tmp, tmp, offset);
+             tcg_gen_andi_i32(tmp, tmp, 0xfffffffc);
+ 
++            if (qasan_max_call_stack)
++              gen_helper_qasan_shadow_stack_push(tcg_const_ptr(s->pc));
++
+             tmp2 = tcg_temp_new_i32();
+             tcg_gen_movi_i32(tmp2, s->pc | 1);
+             store_reg(s, 14, tmp2);
+@@ -12979,6 +13040,8 @@ static void disas_thumb_insn(DisasContext *s, uint32_t insn)
+ 
+         if (insn & (1 << 11)) {
+             /* 0b1111_1xxx_xxxx_xxxx : BL suffix */
++            if (qasan_max_call_stack)
++              gen_helper_qasan_shadow_stack_push(tcg_const_ptr(s->pc));
+             offset = ((insn & 0x7ff) << 1) | 1;
+             tmp = load_reg(s, 14);
+             tcg_gen_addi_i32(tmp, tmp, offset);
+####################################################################
+diff --git a/target/i386/fpu_helper.c b/target/i386/fpu_helper.c
+index ea5a0c48..225729de 100644
+--- a/target/i386/fpu_helper.c
++++ b/target/i386/fpu_helper.c
+@@ -384,10 +384,16 @@ void helper_fxchg_ST0_STN(CPUX86State *env, int st_index)
+ 
+ static const int fcom_ccval[4] = {0x0100, 0x4000, 0x0000, 0x4500};
+ 
++#include "../afl/afl-qemu-common.h"
++
+ void helper_fcom_ST0_FT0(CPUX86State *env)
+ {
+     int ret;
+ 
++    if (afl_compcov_level > 2 && env->eip < afl_end_code &&
++        env->eip >= afl_start_code)
++      afl_float_compcov_log_80(env->eip, ST0, FT0);
++
+     ret = floatx80_compare(ST0, FT0, &env->fp_status);
+     env->fpus = (env->fpus & ~0x4500) | fcom_ccval[ret + 1];
+ }
+@@ -396,6 +402,10 @@ void helper_fucom_ST0_FT0(CPUX86State *env)
+ {
+     int ret;
+ 
++    if (afl_compcov_level > 2 && env->eip < afl_end_code &&
++        env->eip >= afl_start_code)
++      afl_float_compcov_log_80(env->eip, ST0, FT0);
++
+     ret = floatx80_compare_quiet(ST0, FT0, &env->fp_status);
+     env->fpus = (env->fpus & ~0x4500) | fcom_ccval[ret + 1];
+ }
+@@ -407,6 +417,10 @@ void helper_fcomi_ST0_FT0(CPUX86State *env)
+     int eflags;
+     int ret;
+ 
++    if (afl_compcov_level > 2 && env->eip < afl_end_code &&
++        env->eip >= afl_start_code)
++      afl_float_compcov_log_80(env->eip, ST0, FT0);
++
+     ret = floatx80_compare(ST0, FT0, &env->fp_status);
+     eflags = cpu_cc_compute_all(env, CC_OP);
+     eflags = (eflags & ~(CC_Z | CC_P | CC_C)) | fcomi_ccval[ret + 1];
+@@ -418,6 +432,10 @@ void helper_fucomi_ST0_FT0(CPUX86State *env)
+     int eflags;
+     int ret;
+ 
++    if (afl_compcov_level > 2 && env->eip < afl_end_code &&
++        env->eip >= afl_start_code)
++      afl_float_compcov_log_80(env->eip, ST0, FT0);
++
+     ret = floatx80_compare_quiet(ST0, FT0, &env->fp_status);
+     eflags = cpu_cc_compute_all(env, CC_OP);
+     eflags = (eflags & ~(CC_Z | CC_P | CC_C)) | fcomi_ccval[ret + 1];
+####################################################################
+diff --git a/target/i386/ops_sse.h b/target/i386/ops_sse.h
+index ed059897..b32f9e1b 100644
+--- a/target/i386/ops_sse.h
++++ b/target/i386/ops_sse.h
+@@ -997,6 +997,8 @@ SSE_HELPER_CMP(cmpord, FPU_CMPORD)
+ 
+ static const int comis_eflags[4] = {CC_C, CC_Z, 0, CC_Z | CC_P | CC_C};
+ 
++#include "../afl/afl-qemu-common.h"
++
+ void helper_ucomiss(CPUX86State *env, Reg *d, Reg *s)
+ {
+     int ret;
+@@ -1004,6 +1006,11 @@ void helper_ucomiss(CPUX86State *env, Reg *d, Reg *s)
+ 
+     s0 = d->ZMM_S(0);
+     s1 = s->ZMM_S(0);
++
++   if (afl_compcov_level > 2 && env->eip < afl_end_code &&
++        env->eip >= afl_start_code)
++      afl_float_compcov_log_32(env->eip, s0, s1, &env->sse_status);
++
+     ret = float32_compare_quiet(s0, s1, &env->sse_status);
+     CC_SRC = comis_eflags[ret + 1];
+ }
+@@ -1015,6 +1022,11 @@ void helper_comiss(CPUX86State *env, Reg *d, Reg *s)
+ 
+     s0 = d->ZMM_S(0);
+     s1 = s->ZMM_S(0);
++
++   if (afl_compcov_level > 2 && env->eip < afl_end_code &&
++        env->eip >= afl_start_code)
++      afl_float_compcov_log_32(env->eip, s0, s1, &env->sse_status);
++
+     ret = float32_compare(s0, s1, &env->sse_status);
+     CC_SRC = comis_eflags[ret + 1];
+ }
+@@ -1026,6 +1038,11 @@ void helper_ucomisd(CPUX86State *env, Reg *d, Reg *s)
+ 
+     d0 = d->ZMM_D(0);
+     d1 = s->ZMM_D(0);
++
++   if (afl_compcov_level > 2 && env->eip < afl_end_code &&
++        env->eip >= afl_start_code)
++      afl_float_compcov_log_64(env->eip, d0, d1, &env->sse_status);
++
+     ret = float64_compare_quiet(d0, d1, &env->sse_status);
+     CC_SRC = comis_eflags[ret + 1];
+ }
+@@ -1037,6 +1054,11 @@ void helper_comisd(CPUX86State *env, Reg *d, Reg *s)
+ 
+     d0 = d->ZMM_D(0);
+     d1 = s->ZMM_D(0);
++
++   if (afl_compcov_level > 2 && env->eip < afl_end_code &&
++        env->eip >= afl_start_code)
++      afl_float_compcov_log_64(env->eip, d0, d1, &env->sse_status);
++
+     ret = float64_compare(d0, d1, &env->sse_status);
+     CC_SRC = comis_eflags[ret + 1];
+ }
+####################################################################
+diff --git a/target/i386/translate.c b/target/i386/translate.c
+index 0dd5fbe4..545803b4 100644
+--- a/target/i386/translate.c
++++ b/target/i386/translate.c
+@@ -32,6 +32,8 @@
+ #include "trace-tcg.h"
+ #include "exec/log.h"
+ 
++#include "../afl/afl-qemu-cpu-translate-inl.h"
++
+ #define PREFIX_REPZ   0x01
+ #define PREFIX_REPNZ  0x02
+ #define PREFIX_LOCK   0x04
+# 插入afl_gen_compcov函数调用，用以收集操作的代码覆盖信息
+@@ -1343,9 +1345,11 @@ static void gen_op(DisasContext *s1, int op, TCGMemOp ot, int d)
+             tcg_gen_atomic_fetch_add_tl(s1->cc_srcT, s1->A0, s1->T0,
+                                         s1->mem_index, ot | MO_LE);
+             tcg_gen_sub_tl(s1->T0, s1->cc_srcT, s1->T1);
++            afl_gen_compcov(s1->pc, s1->cc_srcT, s1->T1, ot, d == OR_EAX);
+         } else {
+             tcg_gen_mov_tl(s1->cc_srcT, s1->T0);
+             tcg_gen_sub_tl(s1->T0, s1->T0, s1->T1);
++            afl_gen_compcov(s1->pc, s1->T0, s1->T1, ot, d == OR_EAX);
+             gen_op_st_rm_T0_A0(s1, ot, d);
+         }
+         gen_op_update2_cc(s1);
+@@ -1389,6 +1393,7 @@ static void gen_op(DisasContext *s1, int op, TCGMemOp ot, int d)
+         tcg_gen_mov_tl(cpu_cc_src, s1->T1);
+         tcg_gen_mov_tl(s1->cc_srcT, s1->T0);
+         tcg_gen_sub_tl(cpu_cc_dst, s1->T0, s1->T1);
++        afl_gen_compcov(s1->pc, s1->T0, s1->T1, ot, d == OR_EAX);
+         set_cc_op(s1, CC_OP_SUBB + ot);
+         break;
+     }
+@@ -4128,6 +4133,14 @@ static void gen_sse(CPUX86State *env, DisasContext *s, int b,
+             if (b1 >= 2) {
+                 goto unknown_op;
+             }
++            
++            if (b == 0xf2) {
++                /* QASAN backdoor */
++                gen_helper_qasan_fake_instr(cpu_regs[R_EAX], cpu_env,
++                                            cpu_regs[R_EAX], cpu_regs[R_EDI],
++                                            cpu_regs[R_ESI], cpu_regs[R_EDX]);
++                break;
++            }
+ 
+             sse_fn_eppi = sse_op_table7[b].op[b1];
+             if (!sse_fn_eppi) {
+@@ -4508,6 +4521,8 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
+     rex_w = -1;
+     rex_r = 0;
+ 
++    AFL_QEMU_TARGET_i386_SNIPPET
++
+  next_byte:
+     b = x86_ldub_code(env, s);
+     /* Collect prefixes.  */
+
+# 在 disas_insn 函数中增加了QASan对栈操作的监控
+#       入栈保护：当执行栈操作（如 push）时，检查栈是否受到污染，调用 gen_helper_qasan_shadow_stack_push 函数。
+#       出栈保护：在执行栈操作（如 pop）时，调用 gen_helper_qasan_shadow_stack_pop 函数，确保栈操作的安全性。
+@@ -5056,6 +5071,8 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
+                 tcg_gen_ext16u_tl(s->T0, s->T0);
+             }
+             next_eip = s->pc - s->cs_base;
++            if (qasan_max_call_stack)
++              gen_helper_qasan_shadow_stack_push(tcg_const_ptr(s->pc));
+             tcg_gen_movi_tl(s->T1, next_eip);
+             gen_push_v(s, s->T1);
+             gen_op_jmp_v(s->T0);
+@@ -5067,6 +5084,8 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
+             gen_add_A0_im(s, 1 << ot);
+             gen_op_ld_v(s, MO_16, s->T0, s->A0);
+         do_lcall:
++            if (qasan_max_call_stack)
++              gen_helper_qasan_shadow_stack_push(tcg_const_ptr(s->pc));
+             if (s->pe && !s->vm86) {
+                 tcg_gen_trunc_tl_i32(s->tmp2_i32, s->T0);
+                 gen_helper_lcall_protected(cpu_env, s->tmp2_i32, s->T1,
+@@ -6477,6 +6496,8 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
+         ot = gen_pop_T0(s);
+         gen_stack_update(s, val + (1 << ot));
+         /* Note that gen_pop_T0 uses a zero-extending load.  */
++        if (qasan_max_call_stack)
++          gen_helper_qasan_shadow_stack_pop(s->T0);
+         gen_op_jmp_v(s->T0);
+         gen_bnd_jmp(s);
+         gen_jr(s, s->T0);
+@@ -6485,6 +6506,8 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
+         ot = gen_pop_T0(s);
+         gen_pop_update(s, ot);
+         /* Note that gen_pop_T0 uses a zero-extending load.  */
++        if (qasan_max_call_stack)
++          gen_helper_qasan_shadow_stack_pop(s->T0);
+         gen_op_jmp_v(s->T0);
+         gen_bnd_jmp(s);
+         gen_jr(s, s->T0);
+@@ -6497,12 +6520,15 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
+             gen_jmp_im(s, pc_start - s->cs_base);
+             gen_helper_lret_protected(cpu_env, tcg_const_i32(dflag - 1),
+                                       tcg_const_i32(val));
++            // QASAN: TODO
+         } else {
+             gen_stack_A0(s);
+             /* pop offset */
+             gen_op_ld_v(s, dflag, s->T0, s->A0);
+             /* NOTE: keeping EIP updated is not a problem in case of
+                exception */
++            if (qasan_max_call_stack)
++              gen_helper_qasan_shadow_stack_pop(s->T0);
+             gen_op_jmp_v(s->T0);
+             /* pop selector */
+             gen_add_A0_im(s, 1 << dflag);
+@@ -6544,6 +6570,8 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
+                 tval = (int16_t)insn_get(env, s, MO_16);
+             }
+             next_eip = s->pc - s->cs_base;
++            if (qasan_max_call_stack)
++              gen_helper_qasan_shadow_stack_push(tcg_const_ptr(s->pc));
+             tval += next_eip;
+             if (dflag == MO_16) {
+                 tval &= 0xffff;
+####################################################################
+diff --git a/tcg/tcg-op.c b/tcg/tcg-op.c
+index 7a8015c5..139a05d6 100644
+--- a/tcg/tcg-op.c
++++ b/tcg/tcg-op.c
+@@ -32,6 +32,41 @@
+ #include "trace-tcg.h"
+ #include "trace/mem.h"
+ 
++#ifdef CONFIG_USER_ONLY
++
++#define GEN_QASAN_OP(OP) \
++void qasan_gen_##OP(TCGv addr, int off) { \
++  \
++  (void*)off; \
++  if (cur_block_is_good) \
++    gen_helper_qasan_##OP(cpu_env, addr); \
++ \
++}
++
++#else
++
++#define GEN_QASAN_OP(OP) \
++void qasan_gen_##OP(TCGv addr, int off) { \
++  \
++  if (cur_block_is_good) { \
++    TCGv_i32 idx = tcg_const_i32(off); \
++    gen_helper_qasan_##OP(cpu_env, addr, idx); \
++    tcg_temp_free(idx); \
++  } \
++ \
++}
++
++#endif
+# 定义了一个宏 GEN_QASAN_OP，根据条件编译来生成不同的 qasan_gen_* 函数。
+# 如果是 CONFIG_USER_ONLY 用户模式，则 qasan_gen_* 函数仅传递地址（addr）给 gen_helper_qasan_* 函数，不包含偏移量（off）。
+# 否则，偏移量（off）会作为参数传递给 gen_helper_qasan_* 函数，并且生成的代码需要释放临时变量 idx。
+# 此宏为不同类型的内存访问（加载和存储）生成了具体的 qasan_gen_* 函数，以便在执行内存操作时进行 AddressSanitizer 检查。
++
++GEN_QASAN_OP(load1)
++GEN_QASAN_OP(load2)
++GEN_QASAN_OP(load4)
++GEN_QASAN_OP(load8)
++GEN_QASAN_OP(store1)
++GEN_QASAN_OP(store2)
++GEN_QASAN_OP(store4)
++GEN_QASAN_OP(store8)
+# 使用 GEN_QASAN_OP 宏，生成了用于内存加载和存储操作的 qasan_gen_* 函数。每个函数对应不同大小的数据加载/存储操作（例如 load1、store4 等）。
+# 作用：这些函数将在进行内存操作时，调用 gen_helper_qasan_* 来执行实际的 AddressSanitizer 检查。
++
+ /* Reduce the number of ifdefs below.  This assumes that all uses of
+    TCGV_HIGH and TCGV_LOW are properly protected by a conditional that
+    the compiler can eliminate.  */
+@@ -2705,7 +2740,15 @@ void tcg_gen_qemu_ld_i32(TCGv_i32 val, TCGv addr, TCGArg idx, TCGMemOp memop)
+     memop = tcg_canonicalize_memop(memop, 0, 0);
+     trace_guest_mem_before_tcg(tcg_ctx->cpu, cpu_env,
+                                addr, trace_mem_get_info(memop, 0));
++                               
+     gen_ldst_i32(INDEX_op_qemu_ld_i32, val, addr, memop, idx);
++    switch (memop & MO_SIZE) {
++        case MO_64: qasan_gen_load8(addr, idx); break;
++        case MO_32: qasan_gen_load4(addr, idx); break;
++        case MO_16: qasan_gen_load2(addr, idx); break;
++        case MO_8:  qasan_gen_load1(addr, idx); break;
++        default: qasan_gen_load4(addr, idx); break;
++    }
+ }
+ 
+ void tcg_gen_qemu_st_i32(TCGv_i32 val, TCGv addr, TCGArg idx, TCGMemOp memop)
+@@ -2714,7 +2757,15 @@ void tcg_gen_qemu_st_i32(TCGv_i32 val, TCGv addr, TCGArg idx, TCGMemOp memop)
+     memop = tcg_canonicalize_memop(memop, 0, 1);
+     trace_guest_mem_before_tcg(tcg_ctx->cpu, cpu_env,
+                                addr, trace_mem_get_info(memop, 1));
++    
+     gen_ldst_i32(INDEX_op_qemu_st_i32, val, addr, memop, idx);
++    switch (memop & MO_SIZE) {
++        case MO_64: qasan_gen_store8(addr, idx); break;
++        case MO_32: qasan_gen_store4(addr, idx); break;
++        case MO_16: qasan_gen_store2(addr, idx); break;
++        case MO_8:  qasan_gen_store1(addr, idx); break;
++        default: qasan_gen_store4(addr, idx); break;
++    }
+ }
+ 
+ void tcg_gen_qemu_ld_i64(TCGv_i64 val, TCGv addr, TCGArg idx, TCGMemOp memop)
+@@ -2733,7 +2784,15 @@ void tcg_gen_qemu_ld_i64(TCGv_i64 val, TCGv addr, TCGArg idx, TCGMemOp memop)
+     memop = tcg_canonicalize_memop(memop, 1, 0);
+     trace_guest_mem_before_tcg(tcg_ctx->cpu, cpu_env,
+                                addr, trace_mem_get_info(memop, 0));
++    
+     gen_ldst_i64(INDEX_op_qemu_ld_i64, val, addr, memop, idx);
++    switch (memop & MO_SIZE) {
++        case MO_64: qasan_gen_load8(addr, idx); break;
++        case MO_32: qasan_gen_load4(addr, idx); break;
++        case MO_16: qasan_gen_load2(addr, idx); break;
++        case MO_8:  qasan_gen_load1(addr, idx); break;
++        default: qasan_gen_load8(addr, idx); break;
++    }
+ }
+ 
+ void tcg_gen_qemu_st_i64(TCGv_i64 val, TCGv addr, TCGArg idx, TCGMemOp memop)
+@@ -2747,7 +2806,15 @@ void tcg_gen_qemu_st_i64(TCGv_i64 val, TCGv addr, TCGArg idx, TCGMemOp memop)
+     memop = tcg_canonicalize_memop(memop, 1, 1);
+     trace_guest_mem_before_tcg(tcg_ctx->cpu, cpu_env,
+                                addr, trace_mem_get_info(memop, 1));
++    
+     gen_ldst_i64(INDEX_op_qemu_st_i64, val, addr, memop, idx);
++    switch (memop & MO_SIZE) {
++        case MO_64: qasan_gen_store8(addr, idx); break;
++        case MO_32: qasan_gen_store4(addr, idx); break;
++        case MO_16: qasan_gen_store2(addr, idx); break;
++        case MO_8:  qasan_gen_store1(addr, idx); break;
++        default: qasan_gen_store8(addr, idx); break;
++    }
+ }
+# 修改了 tcg_gen_qemu_ld_i32、tcg_gen_qemu_st_i32、tcg_gen_qemu_ld_i64、tcg_gen_qemu_st_i64 等内存操作函数，加入了对 qasan_gen_* 函数的调用
+# 每次执行内存操作时，都会调用对应的 qasan_gen_* 函数：
+#       加载操作（如 qasan_gen_load8、qasan_gen_load4 等）
+#       存储操作（如 qasan_gen_store8、qasan_gen_store4 等）
+# 这些函数的作用是：
+#       检查当前内存访问是否有越界、非法访问等错误。
+#       对内存访问进行监控和错误报告，帮助检测潜在的内存错误。
+####################################################################
+diff --git a/tcg/tcg-op.h b/tcg/tcg-op.h
+index db4e9188..02a777b8 100644
+--- a/tcg/tcg-op.h
++++ b/tcg/tcg-op.h
+@@ -29,6 +29,8 @@
+ #include "exec/helper-proto.h"
+ #include "exec/helper-gen.h"
+ 
++#include "qasan-qemu.h"
++
+ /* Basic output routines.  Not for general consumption.  */
+ 
+ void tcg_gen_op1(TCGOpcode, TCGArg);
+####################################################################
+diff --git a/tcg/tcg.c b/tcg/tcg.c
+index e85133ef..23843ba7 100644
+--- a/tcg/tcg.c
++++ b/tcg/tcg.c
+@@ -1612,6 +1612,9 @@ bool tcg_op_supported(TCGOpcode op)
+     }
+ }
+ 
++
++#include "../../afl/afl-qemu-tcg-inl.h"
++
+ /* Note: we convert the 64 bit args to 32 bit and do some alignment
+    and endian swap. Maybe it would be better to do the alignment
+    and endian swap in tcg_reg_alloc_call(). */
+####################################################################
+diff --git a/vl.c b/vl.c
+index a5ae5f23..d2045e97 100644
+--- a/vl.c
++++ b/vl.c
+@@ -132,6 +132,10 @@ int main(int argc, char **argv)
+ #include "qapi/qmp/qerror.h"
+ #include "sysemu/iothread.h"
+ 
++#ifdef ASAN_GIOVESE
++void asan_giovese_init(void);
++#endif
++
+ #define MAX_VIRTIO_CONSOLES 1
+ 
+ static const char *data_dir[16];
+@@ -3007,6 +3011,11 @@ int main(int argc, char **argv, char **envp)
+     Error *err = NULL;
+     bool list_data_dirs = false;
+     char *dir, **dirs;
++    
++#ifdef ASAN_GIOVESE
++    asan_giovese_init();
++#endif
++    
+     typedef struct BlockdevOptions_queue {
+         BlockdevOptions *bdo;
+         Location loc;

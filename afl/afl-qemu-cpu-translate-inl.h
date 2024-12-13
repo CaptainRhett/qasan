@@ -101,7 +101,15 @@ static void afl_compcov_log_64(target_ulong cur_loc, target_ulong arg1,
   }
 
 }
-
+/*
+afl_gen_compcov(target_ulong cur_loc, TCGv_i64 arg1, TCGv_i64 arg2, TCGMemOp ot, int is_imm)
+处理覆盖率信息并生成相应的日志记录。
+param:
+      cur_loc：       当前代码位置，表示当前执行的指令地址。
+      arg1 和 arg2：  64位的操作数参数，这些是用于生成覆盖率日志的输入值。
+      ot：            内存操作类型，决定了覆盖率日志的格式（如32位、64位或16位）。
+      is_imm：        指示当前操作是否为立即数操作，通常是用于区分不同类型的操作
+*/
 static void afl_gen_compcov(target_ulong cur_loc, TCGv_i64 arg1, TCGv_i64 arg2,
                             TCGMemOp ot, int is_imm) {
 
@@ -109,8 +117,10 @@ static void afl_gen_compcov(target_ulong cur_loc, TCGv_i64 arg1, TCGv_i64 arg2,
 
   if (!afl_compcov_level || cur_loc > afl_end_code || cur_loc < afl_start_code)
     return;
+  // 这一行检查是否启用了覆盖率收集 (afl_compcov_level)，并且 cur_loc 是否在指定的代码范围内（afl_start_code 到 afl_end_code）。
 
   if (!is_imm && afl_compcov_level < 2) return;
+  // 如果当前不是立即数操作且覆盖率级别小于 2，则直接返回。
 
   switch (ot) {
 
@@ -120,13 +130,17 @@ static void afl_gen_compcov(target_ulong cur_loc, TCGv_i64 arg1, TCGv_i64 arg2,
     default: return;
 
   }
+  // 根据内存操作类型 ot（MO_64、MO_32 或 MO_16）选择对应的覆盖率日志记录函数。如果没有匹配的操作类型，则函数返回。
 
   cur_loc = (cur_loc >> 4) ^ (cur_loc << 8);
   cur_loc &= MAP_SIZE - 7;
+  // 这里通过左移、右移和异或操作对 cur_loc 进行一定的扰动，以增加随机性，避免覆盖率记录的局部模式过于重复。这是为了让每个位置的覆盖率更分散地映射。
 
   if (cur_loc >= afl_inst_rms) return;
+  // 如果修改后的 cur_loc 超过了剩余的指令数量（afl_inst_rms），则返回，表示不再记录。
 
   tcg_gen_afl_compcov_log_call(func, cur_loc, arg1, arg2);
+  // 使用 tcg_gen_afl_compcov_log_call 来调用对应的覆盖率日志记录函数，传递 cur_loc（代码位置）以及操作数 arg1 和 arg2。
 
 }
 
