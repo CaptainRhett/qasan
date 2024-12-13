@@ -128,11 +128,20 @@ index d0d44844..b01ba497 100644
 +#include <sys/types.h>
 +#include <sys/syscall.h>
 +
+# asan_giovese_populate_context 的目的是填充一个 call_context 结构体 ctx，用于描述当前的调用栈信息
+# ctx: 一个指向 call_context 结构体的指针，用于保存当前的调用栈上下文
+# pc: 程序计数器（Program Counter），表示当前执行指令的地址
 +void asan_giovese_populate_context(struct call_context* ctx, target_ulong pc) {
 +
 +  ctx->size = MIN(qasan_shadow_stack.size, qasan_max_call_stack -1) +1;
 +  ctx->addresses = calloc(sizeof(void*), ctx->size);
+
+# 这部分代码设置 ctx 中的 size 字段，表示调用栈的大小
+# 大小由 qasan_shadow_stack.size 和 qasan_max_call_stack - 1 中的较小值确定，并加上 1
+# 然后为 ctx->addresses 分配内存空间，addresses 用来存储栈中每个函数调用的返回地址。
 +  
+# 获取线程id
+# 根据平台不同，代码会通过系统调用或 pthread 库获取当前线程的 ID，并将其存储在 ctx->tid 中
 +#ifdef __NR_gettid
 +  ctx->tid = (uint32_t)syscall(__NR_gettid);
 +#else
@@ -142,14 +151,20 @@ index d0d44844..b01ba497 100644
 +  ctx->tid = (uint32_t)tid;
 +#endif
 +
+# 设置栈的第一个地址为pc
 +  ctx->addresses[0] = pc;
 +  
+# 如果 qasan_shadow_stack.size 小于或等于零，表示没有有效的栈信息，函数直接返回
+# 然后使用两个循环遍历并填充调用栈的地址：
 +  if (qasan_shadow_stack.size <= 0) return; //can be negative when pop does not find nothing
 +  
 +  int i, j = 1;
+# 第一个循环从 qasan_shadow_stack.first->buf 中的索引位置开始，依次填充 ctx->addresses
+# qasan_shadow_stack.first 是栈的第一个块，buf[i] 存储了栈的调用地址
 +  for (i = qasan_shadow_stack.first->index -1; i >= 0 && j < qasan_max_call_stack; --i)
 +    ctx->addresses[j++] = qasan_shadow_stack.first->buf[i];
 +
+# 遍历 qasan_shadow_stack 中的其他块，并填充它们的返回地址到 ctx->addresses 中。b->buf[i] 是每个块中存储的返回地址。
 +  struct shadow_stack_block* b = qasan_shadow_stack.first->next;
 +  while (b && j < qasan_max_call_stack) {
 +  
@@ -162,6 +177,17 @@ index d0d44844..b01ba497 100644
 +
 +#ifdef CONFIG_USER_ONLY
 +
+# addr2line_cmd函数用于将一个给定的地址（通过 lib 和 off 参数提供）转化为相应的函数名和代码行号
+# 这个转换是通过运行系统命令 addr2line 来完成的
+# param：
+#       lib:        一个指向字符串的指针，表示库文件路径（如 libc.so）。
+#       off:        表示偏移量（地址的偏移）。
+#       function:   一个指向字符串指针的指针，用于返回符号化后的函数名。
+#       line:       一个指向字符串指针的指针，用于返回符号化后的代码行号。
+# 工作流程：
+#       如果 qasan_symbolize 标志未设置，函数直接跳过
+#       使用 snprintf 构造 addr2line 命令，并通过 popen 执行它。该命令将地址符号化为函数名和行号
+#       通过 fgets 获取输出的函数名和行号，如果无法获取有效的符号信息（例如输出为 ??），则返回 NULL
 +static void addr2line_cmd(char* lib, uintptr_t off, char** function, char** line) {
 +  
 +  if (!qasan_symbolize) goto addr2line_cmd_skip;
@@ -171,9 +197,14 @@ index d0d44844..b01ba497 100644
 +  size_t cmd_siz = 128 + strlen(lib);
 +  char* cmd = malloc(cmd_siz);
 +  snprintf(cmd, cmd_siz, "addr2line -f -e '%s' 0x%lx", lib, off);
+# snprintf 函数来格式化并生成一个字符串 cmd，该字符串会被传递给 addr2line 工具，用于将程序中的地址（0x%lx）转换为源代码中的行号和函数名
 +
 +  fp = popen(cmd, "r");
 +  free(cmd);
+# popen() 是一个标准库函数，它用来启动一个进程并建立一个管道与父进程之间的通信。
+#       它执行指定的 cmd 命令并返回一个 FILE* 类型的文件指针，该文件指针可以像操作文件一样进行读取或写入。
+# cmd 是要执行的命令，通常是一个 shell 命令（例如 "ls -l" 或 "echo Hello"）。
+# "r" 是模式参数，表示以只读模式打开管道，即读取该命令的标准输出。
 +  
 +  if (fp == NULL) goto addr2line_cmd_skip;
 +
@@ -218,6 +249,9 @@ index d0d44844..b01ba497 100644
 +  
 +}
 +
+# asan_giovese_printaddr 函数用于根据给定的 guest_addr 地址查找并返回该地址对应的函数名和代码行号。
+# param：
+#       guest_addr: 客体程序中的地址
 +char* asan_giovese_printaddr(target_ulong guest_addr) {
 +
 +  FILE *fp;
@@ -327,11 +361,15 @@ index d0d44844..b01ba497 100644
 +
 +#endif
 +
+# qasan_shadow_stack_push 用于将一个指针 ptr 推入一个叫做 qasan_shadow_stack 的栈结构中
+# 它的实现涉及到动态分配内存和维护栈的状态。
 +void HELPER(qasan_shadow_stack_push)(target_ulong ptr) {
 +
 +#if defined(TARGET_ARM)
 +  ptr &= ~1;
 +#endif
+# 如果目标平台是 ARM 架构，这段代码将 ptr 地址的最低位（最低的 1 位）清除
+# ARM 架构通常将地址的最低位作为某种标记（例如，用于指示虚拟地址空间），此操作确保将其标准化为有效的地址。
 +
 +  if (unlikely(!qasan_shadow_stack.first)) {
 +    
@@ -341,9 +379,13 @@ index d0d44844..b01ba497 100644
 +    qasan_shadow_stack.first->next = NULL;
 +
 +  }
+# 如果 qasan_shadow_stack.first 是 NULL，说明栈尚未初始化。此时动态分配内存为栈的第一个块（shadow_stack_block）。
 +    
 +  qasan_shadow_stack.first->buf[qasan_shadow_stack.first->index++] = ptr;
 +  qasan_shadow_stack.size++;
+# 将指针 ptr 存储到 qasan_shadow_stack.first->buf 数组中的当前位置，数组的下标由 index 指示
+# index 增加 1，表示栈中的位置向前移动
+# 栈的大小 qasan_shadow_stack.size 增加 1，表示栈中存储的元素数目增加
 +
 +  if (qasan_shadow_stack.first->index >= SHADOW_BK_SIZE) {
 +
@@ -352,6 +394,10 @@ index d0d44844..b01ba497 100644
 +      ns->index = 0;
 +      qasan_shadow_stack.first = ns;
 +  }
+# 如果当前栈块（qasan_shadow_stack.first）已经满（index >= SHADOW_BK_SIZE），则创建一个新的 shadow_stack_block。
+# 新创建的栈块 ns 将成为栈的顶部（即 qasan_shadow_stack.first）。
+# 新栈块的 next 指向原来的栈块，形成链式结构。
+# 新栈块的 index 初始化为 0，准备接收新的元素。
 +
 +}
 +
@@ -404,6 +450,12 @@ index d0d44844..b01ba497 100644
 +
 +}
 +
+# 这段代码是一个调度器函数，qasan_actions_dispatcher，它根据传入的 action 执行不同的操作。
+# 根据不同的动作（action）类型来执行相应的内存检查、分配、释放等操作。
+# param：
+#       cpu_env：           表示目标 CPU 环境的指针。
+#       action：            操作类型，决定了执行哪个具体的操作。
+#       arg1, arg2, arg3：  操作需要的附加参数。
 +target_long qasan_actions_dispatcher(void *cpu_env,
 +                                     target_long action, target_long arg1,
 +                                     target_long arg2, target_long arg3) {
@@ -414,6 +466,8 @@ index d0d44844..b01ba497 100644
 +#endif
 +
 +    switch(action) {
+
+# 如果使用asan-giovese
 +#ifdef ASAN_GIOVESE
 +        case QASAN_ACTION_CHECK_LOAD:
 +        // fprintf(stderr, "CHECK LOAD: %p [%p] %ld\n", arg1, g2h(arg1), arg2);
@@ -468,6 +522,7 @@ index d0d44844..b01ba497 100644
 +          }
 +          break;
 +        }
+# 如果 ASAN_GIOVESE 没有定义，则使用默认的 ASAN（AddressSanitizer）函数
 +#else
 +        case QASAN_ACTION_CHECK_LOAD:
 +        __asan_loadN(g2h(arg1), arg2);
@@ -521,6 +576,7 @@ index d0d44844..b01ba497 100644
 +    return 0;
 +}
 +
+# 函数 qasan_fake_instr的目的是通过调用 qasan_actions_dispatcher 来处理传入的参数。
 +void* HELPER(qasan_fake_instr)(CPUArchState *env, void* action, void* arg1,
 +                               void* arg2, void* arg3) {
 +
@@ -540,32 +596,57 @@ index d0d44844..b01ba497 100644
 +#define VICTIM_TLB_HIT(TY, ADDR) \
 +  victim_tlb_hit(env, mmu_idx, index, offsetof(CPUTLBEntry, TY), \
 +                 (ADDR) & TARGET_PAGE_MASK)
+# 这个宏用于检查指定内存地址是否在 TLB 中，并调用 victim_tlb_hit 函数
+# TY 和 ADDR 是宏的参数：
+#       TY 表示要访问的 TLB 相关字段（例如 addr_read）
+#       ADDR 是待检查的地址，TARGET_PAGE_MASK 用于保证地址对齐到页面边界
 +
+
+# victim_tlb_hit 函数用于实际检查 TLB 是否命中，并通过 offsetof(CPUTLBEntry, TY) 提取相应字段
+# 该函数负责检查 TLB 是否命中，具体实现需要依赖于 TLB 的实现
+# param：
+#       env：指向 CPU 环境的指针。
+#       mmu_idx：MMU 索引，可能用于区分不同的 MMU。
+#       index：TLB 中条目的索引。
+#       elt_ofs：偏移量，用于指向特定的 TLB 元素字段。
+#       page：需要检查的页面地址。
 +bool victim_tlb_hit(CPUArchState *env, size_t mmu_idx, size_t index,
 +                           size_t elt_ofs, target_ulong page);
 +
+# qasan_page_loadN 的主要功能是执行内存加载操作，并在加载时进行地址检查和可能的内存保护
 +void qasan_page_loadN(CPUArchState *env, target_ulong addr, size_t size, uintptr_t mmu_idx)
 +{
 +    CPUTLBEntry *entry = tlb_entry(env, mmu_idx, addr);
 +    target_ulong tlb_addr = entry->addr_read;
+# tlb_entry(env, mmu_idx, addr)：获取与给定虚拟地址 addr 相关的 TLB 条目。mmu_idx 是 MMU 索引，用于确定访问哪个 TLB 条目。
+# entry->addr_read：这是从 TLB 条目中读取的地址，即映射的物理地址。
 +    uintptr_t haddr;
 +    
 +    /* It is in the TLB, the check is after the real access */
 +    if (!tlb_hit(tlb_addr, addr)) return;
+# tlb_hit(tlb_addr, addr) 检查当前访问的虚拟地址 addr 是否在 TLB 中。
+# 如果没有命中，函数会直接返回，意味着没有缓存该地址的映射。
 +
 +    /* Handle an IO access.  */
 +    if (unlikely(tlb_addr & ~TARGET_PAGE_MASK))
 +        return;
+# unlikely(tlb_addr & ~TARGET_PAGE_MASK)：检查 tlb_addr 地址是否是有效的物理地址。
+# TARGET_PAGE_MASK 是一个掩码，用来确保地址符合页对齐要求。如果地址无效，返回不处理。
 +
 +    haddr = addr + entry->addend;
+# 根据 TLB 条目的 addend（附加值），计算实际的物理地址 haddr。
+# 这是因为 TLB 条目可能包含偏移信息，修正虚拟地址到物理地址的映射。
 +    
 +#ifdef ASAN_GIOVESE
 +    if (asan_giovese_loadN((void*)haddr, size)) {
 +      qasan_cpu = ENV_GET_CPU(env);
 +      asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, addr, size, PC_GET(env), BP_GET(env), SP_GET(env));
 +    }
+# asan_giovese_loadN((void*)haddr, size)：这是一个内存保护检查函数，用于检测加载操作是否存在问题（例如越界或非法访问）
+# 如果检查发现问题，调用 asan_giovese_report_and_crash 报告错误并崩溃程序。
 +#else
 +    __asan_loadN((void*)haddr, size);
+# 这是 AddressSanitizer (ASan) 的标准加载检测函数，用于检测内存加载操作是否存在越界或访问已经释放的内存等问题
 +#endif
 +}
 +
@@ -573,14 +654,20 @@ index d0d44844..b01ba497 100644
 +{
 +    CPUTLBEntry *entry = tlb_entry(env, mmu_idx, addr);
 +    target_ulong tlb_addr = entry->addr_read;
+# tlb_entry(env, mmu_idx, addr)：获取与给定虚拟地址 addr 相关的 TLB 条目。mmu_idx 是 MMU 索引，用于确定访问哪个 TLB 条目。
+# entry->addr_read：这是从 TLB 条目中读取的地址，即映射的物理地址。
 +    uintptr_t haddr;
 +    
 +    /* It is in the TLB, the check is after the real access */
 +    if (!tlb_hit(tlb_addr, addr)) return;
+# tlb_hit(tlb_addr, addr) 检查当前访问的虚拟地址 addr 是否在 TLB 中。
+# 如果没有命中，函数会直接返回，意味着没有缓存该地址的映射。
 +
 +    /* Handle an IO access.  */
 +    if (unlikely(tlb_addr & ~TARGET_PAGE_MASK))
 +        return;
+# unlikely(tlb_addr & ~TARGET_PAGE_MASK)：检查 tlb_addr 地址是否是有效的物理地址。
+# TARGET_PAGE_MASK 是一个掩码，用来确保地址符合页对齐要求。如果地址无效，返回不处理。
 +
 +    haddr = addr + entry->addend;
 +    
@@ -589,8 +676,11 @@ index d0d44844..b01ba497 100644
 +      qasan_cpu = ENV_GET_CPU(env);
 +      asan_giovese_report_and_crash(ACCESS_TYPE_STORE, addr, size, PC_GET(env), BP_GET(env), SP_GET(env));
 +    }
+# asan_giovese_storeN((void*)haddr, size)：这是一个内存保护检查函数，用于检测存储操作是否存在问题（例如越界或非法访问）
+# 如果检测到问题，调用 asan_giovese_report_and_crash 报告错误并崩溃程序。
 +#else
 +    __asan_storeN((void*)haddr, size);
+# 这是 AddressSanitizer (ASan) 的标准存储检测函数，用于检测存储操作是否存在越界或访问已释放的内存等问题
 +#endif
 +}
 +
@@ -1237,10 +1327,6 @@ index 66492aaf..3c5b0439 100644
          ret = syscall(num, arg1, arg2, arg3, arg4, arg5, arg6);
          break;
 ####################################################################
-diff --git a/changes.patch b/changes.patch
-new file mode 100644
-index 00000000..e69de29b
-####################################################################
 diff --git a/exec.c b/exec.c
 index df5571eb..4e2ccf76 100644
 --- a/exec.c
@@ -1249,20 +1335,36 @@ index df5571eb..4e2ccf76 100644
      return result;
  }
  
+# 将虚拟地址 addr 转换为物理地址，并返回物理地址。如果虚拟地址没有映射到物理内存，则返回 -1。
+# params：
+#       cpu: 当前的 CPU 状态。
+#       addr: 要转换的虚拟地址。
 +hwaddr qasan_addr_to_phys(CPUState* cpu, target_ulong addr) {
 +
 +    MemTxAttrs attrs;
 +
 +    target_ulong page = addr & TARGET_PAGE_MASK;
 +    hwaddr phys_addr = cpu_get_phys_page_attrs_debug(cpu, page, &attrs);
+# 计算页地址：page = addr & TARGET_PAGE_MASK;
+#   TARGET_PAGE_MASK 是一个常量，通常用于将虚拟地址对齐到页边界（页大小）。通过与操作，addr 被清除掉低位的地址部分，只保留页地址。
+# 调用 cpu_get_phys_page_attrs_debug：
+#   该函数的作用是获取给定页的物理地址和相关属性。它返回物理地址（phys_addr），并通过 attrs 参数返回该页的内存访问属性。
+#   如果页没有映射到物理内存，phys_addr 将被设置为 -1。
 +    /* if no physical page mapped, return an error */
 +    if (phys_addr == -1)
 +        return -1;
+# 检查物理页是否有效
 +    phys_addr += (addr & ~TARGET_PAGE_MASK);
 +    return phys_addr;
+# 计算并返回物理地址
 +
 +}
 +
+# 是将虚拟地址 addr 转换为主机上的物理内存地址，并将其存储在 host_addr 中
+# params：
+#       cpu: 当前的 CPU 状态。
+#       addr: 要转换的虚拟地址。
+#       host_addr: 输出参数，存储转换后的主机地址。
 +int qasan_addr_to_host(CPUState* cpu, target_ulong addr, void** host_addr) {
 +
 +    MemTxAttrs attrs;
