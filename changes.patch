@@ -76,6 +76,8 @@ index af6bd8cc..db140c7a 100644
 # AFL 相关的代码可能需要访问这个函数以进行进一步的处理或跟踪。通过将其变为全局函数，外部模块就可以直接调用它，进行 TLB（Translation Lookaside Buffer）相关的处理。
 
 ####################################################################
+# 主要的更改都在tcg-runtim中，研究qasan对tcg-runtime的修改至关重要
+
 diff --git a/accel/tcg/tcg-runtime.c b/accel/tcg/tcg-runtime.c
 index d0d44844..b01ba497 100644
 --- a/accel/tcg/tcg-runtime.c
@@ -107,6 +109,9 @@ index d0d44844..b01ba497 100644
 +    } \
 +    _a; \
 +  })
+# qasan_addr_to_host(CPUState* cpu, target_ulong addr, void** host_addr):
+# 将虚拟地址 addr 转换为主机上的物理内存地址，并将其存储在 host_addr 中
+# g2h(x):的值为转换后的物理地址（如果成功转换的话）
 +
 +// h2g must not be defined
 +// #define h2g(x) (x)
@@ -118,7 +123,7 @@ index d0d44844..b01ba497 100644
 +int __qasan_debug;
 +__thread int qasan_disabled;
 +
-+__thread struct shadow_stack qasan_shadow_stack;
++__thread struct shadow_stack qasan_shadow_stack; # 每个线程维护一个影子栈区
 +
 +#ifdef ASAN_GIOVESE
 +
