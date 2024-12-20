@@ -1,6 +1,8 @@
 {
     "files.associations": {
+        "*.patch": "diff",
         "*.code": "cpp",
-        "typeinfo": "cpp"
+        "typeinfo": "cpp",
+        "functional": "cpp"
     }
 }

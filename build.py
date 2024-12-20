@@ -236,44 +236,44 @@ if not args.system:
       % (os.path.join(dir_path, "qemu"), arch, args.cc, args.cxx, cpu_qemu_flag,
    extra_c_flags, extra_ld_flags)
     print (cmd)
-    assert (os.system(cmd) == 0)
+    # assert (os.system(cmd) == 0)
 
-    # 执行 make -j 命令来并行编译 QEMU。nproc 命令会返回当前系统上的 CPU 核心数，从而决定并行编译的任务数。
+#     # 执行 make -j 命令来并行编译 QEMU。nproc 命令会返回当前系统上的 CPU 核心数，从而决定并行编译的任务数。
     cmd = """cd '%s' ; make -j `nproc`""" % (os.path.join(dir_path, "qemu"))
     print (cmd)
-    assert (os.system(cmd) == 0)
+    # assert (os.system(cmd) == 0)
 
-    # 将编译后的 QEMU 可执行文件（如 qemu-x86_64）复制到 qasan-qemu，为后续使用提供可执行文件
-    shutil.copy2(
-      os.path.join(dir_path, "qemu", arch + "-linux-user", "qemu-" + arch),
-      os.path.join(dir_path, "qasan-qemu")
-    )
+#     # 将编译后的 QEMU 可执行文件（如 qemu-x86_64）复制到 qasan-qemu，为后续使用提供可执行文件
+#     shutil.copy2(
+#       os.path.join(dir_path, "qemu", arch + "-linux-user", "qemu-" + arch),
+#       os.path.join(dir_path, "qasan-qemu")
+#     )
     
-    # 设置 libqasan 的编译选项
-    # 对于 32 位架构，加入 -m32 标志
-    libqasan_cflags = "-Wno-int-to-void-pointer-cast -ggdb"
-    if arch == "i386":
-        libqasan_cflags += " -m32"
+#     # 设置 libqasan 的编译选项
+#     # 对于 32 位架构，加入 -m32 标志
+#     libqasan_cflags = "-Wno-int-to-void-pointer-cast -ggdb"
+#     if arch == "i386":
+#         libqasan_cflags += " -m32"
 
-    # 根据 args.debug 判断是否编译调试版本的 libqasan
-    # 执行 make 命令编译 libqasan 库
-    libqasan_target = ''
-    if args.debug:
-        libqasan_target = 'debug'
-    assert ( os.system("""cd '%s' ; make %s CC='%s' CFLAGS='%s'"""
-      % (os.path.join(dir_path, "libqasan"), libqasan_target, cross_cc,
-         libqasan_cflags)) == 0 )
+#     # 根据 args.debug 判断是否编译调试版本的 libqasan
+#     # 执行 make 命令编译 libqasan 库
+#     libqasan_target = ''
+#     if args.debug:
+#         libqasan_target = 'debug'
+#     assert ( os.system("""cd '%s' ; make %s CC='%s' CFLAGS='%s'"""
+#       % (os.path.join(dir_path, "libqasan"), libqasan_target, cross_cc,
+#          libqasan_cflags)) == 0 )
     
-    # 将编译后的 libqasan.so 复制到当前目录
-    shutil.copy2(
-      os.path.join(dir_path, "libqasan", "libqasan.so"),
-      dir_path
-    )
+#     # 将编译后的 libqasan.so 复制到当前目录
+#     shutil.copy2(
+#       os.path.join(dir_path, "libqasan", "libqasan.so"),
+#       dir_path
+#     )
 
-    print("user mode Successful build.")
-    print("Test it with ./qasan /bin/ls")
-    print("")
-# 系统模式
+#     print("user mode Successful build.")
+#     print("Test it with ./qasan /bin/ls")
+#     print("")
+# # 系统模式
 else:
     cmd = """cd '%s' ; ./configure --target-list="%s-softmmu" --enable-pie \
       --cc="%s" --cxx="%s" --extra-cflags="-O3 -ggdb %s" --extra-ldflags="%s" \
