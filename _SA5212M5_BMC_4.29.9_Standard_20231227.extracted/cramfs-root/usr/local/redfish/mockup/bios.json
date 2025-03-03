@@ -1,0 +1,111 @@
+{  
+
+  "@odata.context": "/redfish/v1/$metadata#Bios.Bios",
+  "@odata.etag": "FFF8192527103838382D44B5784E6323",
+  "@odata.id": "/redfish/v1/systems/1/bios/",
+  "@odata.type": "#Bios.v1_0_0.Bios",  
+  "Actions":   {
+    "#Bios.ChangePassword":     {
+      "target": "/redfish/v1/systems/1/bios/settings/Actions/Bios.ChangePasswords/"
+    },
+    "#Bios.ResetBios":     {
+      "target": "/redfish/v1/systems/1/bios/settings/Actions/Bios.ResetBios/"
+    }
+  },
+  "AttributeRegistry": "BiosAttributeRegistryU30.v1_1_20",  
+  "Attributes":   {
+    "SecurityDeviceSupport": 0,
+    "Above_4G": 0,
+    "NetworkStack": 0,
+    "IPV4PXESupport": 0,
+    "IPV6PXESupport": 0,
+    "CSMSupport": 0,
+    "OptionRomNetwork": 0,
+    "OptionRomStorage": 0,
+    "OptionRomVideo": 0,
+    "OptionRomOtherPCIE": 0,
+    "SATAContoller": 0,
+    "SATAModeOptions": 0,
+    "sSATAContoller": 0,
+    "sSATAModeOptions": 0,
+    "RestoreACPowerLoss": 0,
+    "MaxPageTableSize": 0,
+    "VGAPriority": 0,
+    "SystemErrors": 0,
+    "PCIEHotPlug": 0,
+    "PCIEASPMSupport": 0,
+    "UncoreFreqScaling": 0,
+    "PStates": 0,
+    "HardwarePstates": 0,
+    "EPPEnable": 0,
+    "MonitorMWaitSupport": 0,
+    "AutonomousCoreCState": 0,
+    "CPUC6Report": 0,
+    "EnhancedHaltState": 0,
+    "PackageCState": 0,
+    "PowerPerformTuning": 0,
+    "IntelTXTSupport": 0,
+    "VMX": 0,
+    "SMX": 0,
+    "HardwarePrefetcher": 0,
+    "AdjacentCachePrefetch": 0,
+    "DCUStreamerPrefetcher": 0,
+    "DCUIPPrefetcher": 0,
+    "LLCPrefetch": 0,
+    "DCUMode": 0,
+    "ExtendedAPIC": 0,
+    "MMIOHighBase": 0,
+    "MMIOHighGranularitySize": 0,
+    "Numa": 0,
+    "SubNUMAClustering": 0,
+    "LegacyVGASocket": 0,
+    "EnforcePOR": 0,
+    "MemoryFrequency": 0,
+    "DataScramblingForNVMDIMM": 0,
+    "DataScramblingForDDR4": 0,
+    "EnableADR": 0,
+    "LegacyADRMode": 0,
+    "VolatileMemoryMode": 0,
+    "MemoryInterleaveGranularity": 0,
+    "IMCInterleaving": 0,
+    "ChannelInterleaving": 0,
+    "RankInterleaving": 0,
+    "SocketInterleaveBelow4GB": 0,
+    "StaticVirtualLockstepMode": 0,
+    "MirrorMode": 0,
+    "MemoryRankSparing": 0,
+    "CorrectableErrorThreshold": 0,
+    "SDDCPlusOne": 0,
+    "ADDDCSparing": 0,
+    "PatrolScrub": 0,
+    "PatrolScrubInterval": 0,
+    "FRB2Timer": 0,
+    "FRB2TimerTimeout": 0,
+    "FRB2TimerPolicy": 0,
+    "OSWatchDogTimer": 0,
+    "SharelinkNetwork": 0,
+    "SharelinkVlanControl": 0,
+    "DedicatedVlanVlanControl": 0,
+    "Boot_Retry": 0,
+    "QuietBoot": 0,
+    "NewBootOptionPolicy": 0
+  },
+  "Id": "bios",
+  "Name": "BIOS Current Settings",  
+  "Oem":   {
+    "Hpe":     {
+      "@odata.type": "#HpeBiosExt.v2_0_0.HpeBiosExt",
+      "Links":       {
+        "BaseConfigs":         {
+          "@odata.id": "/redfish/v1/systems/1/bios/baseconfigs/"
+        },
+        "Boot":         {
+          "@odata.id": "/redfish/v1/systems/1/bios/boot/"
+        }
+      },
+      "SettingsObject":       {
+        "UnmodifiedETag": "B91D93C576E8D0D0D09C294894C1C7BC"
+      }
+    }
+  }
+}

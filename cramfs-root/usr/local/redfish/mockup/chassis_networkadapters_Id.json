@@ -1,0 +1,34 @@
+{ 
+    "@odata.context": "/redfish/v1/$metadata#Chassis/Members/1/NetworkAdapters/Members/$entity",
+    "@odata.id": "/redfish/v1/Chassis/1/NetworkAdapters/outboardPCIeCard1",
+    "@odata.type": "#NetworkAdapter.v1_0_0.NetworkAdapter",
+    "Id": "outboardPCIeCard1",
+    "Name": "outboardPCIeCard1",
+    "Manufacturer": "Mellanox Technologies",
+    "Model": "CX4-Lx",
+    "Oem": {
+            "DriverName": null,
+            "DriverVersion": null,
+            "CardManufacturer": "Mellanox Technologies",
+            "CardModel": "2*10GE",
+            "Position": "outboard",
+            "NetworkTechnology": [
+                "Ethernet"
+            ],
+            "NetworkPorts": [
+                {
+                    "@odata.id": "/redfish/v1/Chassis/1/NetworkAdapters/mainboardPCIeCard1/NetworkPorts/1"
+                },
+                {
+                    "@odata.id": "/redfish/v1/Chassis/1/NetworkAdapters/mainboardPCIeCard1/NetworkPorts/2"
+                }
+            ],
+            "RootBDF": "",
+            "Configuration": null
+    },
+    "Controllers": [],
+    "Status": {
+        "State": "Enabled",
+        "Health": "OK"
+    }
+}

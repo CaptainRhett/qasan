@@ -1,0 +1,11 @@
+{
+  "@odata.context": "/redfish/v1/$metadata#Managers/Members/1/NtpService/$entity",
+  "@odata.id": "/redfish/v1/Managers/1/NtpService",
+  "@odata.type": "#NtpService.v1_0_0.NtpService",
+  "Description": "NtpService Settings",
+  "ServiceEnabled": "false",
+  "PreferredNtpServer": "",
+  "AlternateNtpServer": "",
+  "NtpAddressOrigin": "Static",
+  "PollingInterval": 3,
+}

@@ -1,0 +1,45 @@
+{
+  "@odata.context": "/redfish/v1/$metadata#Chassis/Members/1/Power/$entity",
+  "@odata.id": "/redfish/v1/Chassis/1/Power",
+  "@odata.type": "#Power.v1_1_0.Power",
+  "Id": "Power",
+  "Name": "Power",
+  "PowerControl": [
+    {
+      "@odata.id": "/redfish/v1/Chassis/1/Power#/PowerControl/0",
+      "MemberId": "0",
+      "Name": "System Power Control 1",
+      "PowerConsumedWatts": 36,
+      "PowerLimit": {
+        "LimitInWatts": 700,
+        "LimitException": "NoAction"
+      },
+    }
+  ],
+"Redundancy": [
+    {
+      "@odata.id": "/redfish/v1/Chassis/1/Power#/Redundancy/0",
+      "MemberId": "0",
+      "Name": "PowerSupply Redundancy Group 1",
+      "Mode": "Sharing",
+      "MaxNumSupported": 2,
+      "MinNumNeeded": 2,
+      "Status": {
+        "Health": "OK",
+        "State": "Enabled"
+      }
+    },
+    {
+      "@odata.id": "/redfish/v1/Chassis/1/Power#/Redundancy/1",
+      "MemberId": "1",
+      "Name": "PowerSupply Redundancy Group 2",
+      "Mode": "Failover",
+      "MaxNumSupported": 2,
+      "MinNumNeeded": 2,
+      "Status": {
+        "Health": "OK",
+        "State": "Enabled"
+      }
+    }
+  ]
+ }    

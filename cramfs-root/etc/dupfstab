@@ -1,0 +1,3 @@
+/dev/mtdblock1                /conf                jffs2        defaults 0 0
+/dev/mtdblock3                /usr/local/www                cramfs        defaults 0 0
+/dev/mtdblock4                /usr/local/log                jffs2        defaults 0 0

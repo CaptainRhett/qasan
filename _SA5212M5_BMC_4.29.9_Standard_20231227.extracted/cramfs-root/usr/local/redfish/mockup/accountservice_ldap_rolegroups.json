@@ -1,0 +1,16 @@
+{
+    "@odata.context": "/redfish/v1/$metadata#AccountService/LdapService.RoleGroups",
+    "@odata.id": "/redfish/v1/AccountService/LdapService/RoleGroups",
+    "@odata.type": "#InspurLdapService.v1_0_0.InspurLdapService",
+    "Name": "Ldap Service",
+    "Id": "LdapService",
+    "Members@odata.count": 2,
+    "Members": [
+	    {
+	        "@odata.id": "/redfish/v1/AccountService/LdapService/RoleGroups/1"
+	    },
+	    {
+	        "@odata.id": "/redfish/v1/AccountService/LdapService/RoleGroups/2"
+	    }
+	]
+}

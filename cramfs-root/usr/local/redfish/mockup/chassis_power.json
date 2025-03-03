@@ -1,0 +1,136 @@
+{
+    "@odata.type": "#Power.v1_1_0.Power",
+    "Id": "Power",
+    "Name": "Power",
+    "PowerControl":[
+		 {
+		        "@odata.id": "/redfish/v1/Chassis/1/Power#/PowerControl/0",
+		        "MemberId": "0",
+		        "Name": "System Power Control 1",
+		        "PowerConsumedWatts": 0,
+		        "PowerCapacityWatts": null,
+		        "PowerLimit": {
+		            "LimitInWatts": null,
+		            "LimitException": "NoAction"
+		        }
+		 }
+	 ],
+	 "Redundancy":[
+	 	{
+			"@odata.id": "/redfish/v1/Chassis/1/Power#/Redundancy/0",
+			"MemberId": "0",
+			"Name": "PowerSupply Redundancy Group 1",
+			"Mode": "Sharing",
+			"MaxNumSupported": 2,
+			"MinNumNeeded": 2,
+			"Status": {
+			  "Health": "OK",
+			  "State": "Enabled"
+			}
+		},
+		{
+			"@odata.id": "/redfish/v1/Chassis/1/Power#/Redundancy/1",
+			"MemberId": "1",
+			"Name": "PowerSupply Redundancy Group 2",
+			"Mode": "Failover",
+			"MaxNumSupported": 2,
+			"MinNumNeeded": 2,
+			"Status": {
+			  "Health": "OK",
+			  "State": "Enabled"
+			}
+		}
+	],
+    "Voltages": [
+        {
+            "@odata.id": "/redfish/v1/Chassis/1U/Power#/Voltages/0",
+            "MemberId": "0",
+            "Name": "VRM1 Voltage",
+            "SensorNumber": 11,
+            "Status": {
+                "State": "Enabled",
+                "Health": "OK"
+            },
+            "ReadingVolts": 12,
+            "UpperThresholdNonCritical": 12.5,
+            "UpperThresholdCritical": 13,
+            "UpperThresholdFatal": 15,
+            "LowerThresholdNonCritical": 11.5,
+            "LowerThresholdCritical": 11,
+            "LowerThresholdFatal": 10,
+            "MinReadingRange": 0,
+            "MaxReadingRange": 20,
+            "PhysicalContext": "VoltageRegulator",
+            "RelatedItem": [
+                {
+                    "@odata.id": "/redfish/v1/Systems/437XR1138R2"
+                },
+                {
+                    "@odata.id": "/redfish/v1/Chassis/1U"
+                }
+            ]
+        },
+        {
+            "@odata.id": "/redfish/v1/Chassis/1U/Power#/Voltages/1",
+            "MemberId": "1",
+            "Name": "VRM2 Voltage",
+            "SensorNumber": 12,
+            "ReadingVolts": 5,
+            "UpperThresholdNonCritical": 5.5,
+            "UpperThresholdCritical": 7,
+            "LowerThresholdNonCritical": 4.75,
+            "LowerThresholdCritical": 4.5,
+            "RelatedItem": [
+                {
+                    "@odata.id": "/redfish/v1/Systems/437XR1138R2"
+                },
+                {
+                    "@odata.id": "/redfish/v1/Chassis/1U"
+                }
+            ]
+        }
+    ],
+    "PowerSupplies": [
+        {
+            "@odata.id": "/redfish/v1/Chassis/1U/Power#/PowerSupplies/0",
+            "MemberId": "0",
+            "Name": "Power Supply Bay",
+            "Status": {
+                "State": "Enabled",
+                "Health": "Warning"
+            },
+    "PartNumber": "0",
+    "Oem": {
+        "WorkMode": "active",
+        "StatusWord": "0x00",
+        "Temperature": 0,
+        "InputPower": 0,
+        "OutputVolt": 0,
+        "InputCurrent": 0,
+        "OutputCurrent": 0,  
+    }, 
+            "PowerSupplyType": "AC",
+            "LineInputVoltageType": "ACWideRange",
+            "LineInputVoltage": 120,
+            "PowerCapacityWatts": 800,
+            "LastPowerOutputWatts": 325,
+            "Model": "499253-B21",
+            "Manufacturer": "ManufacturerName",
+            "FirmwareVersion": "1.00",
+            "SerialNumber": "1Z0000001",
+            "InputRanges": [
+                {
+                    "OutputWattage": 1300
+                }
+            ],
+            "RelatedItem": [
+                {
+                    "@odata.id": "/redfish/v1/Chassis/1U"
+                }
+            ]
+        }
+    ],
+    "Oem": {},
+    "@odata.context": "/redfish/v1/$metadata#Power.Power",
+    "@odata.id": "/redfish/v1/Chassis/1/Power",
+}

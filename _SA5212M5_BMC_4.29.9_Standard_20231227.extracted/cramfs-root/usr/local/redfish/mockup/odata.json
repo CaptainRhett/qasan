@@ -1,0 +1,64 @@
+{
+    "@odata.context": "/redfish/v1/$metadata#odata.odata",
+    "@odata.id": "/redfish/v1/odata",
+    "@odata.type": "#odata.v4_0_4.odata",
+    "Id": "odata",
+    "Name": "odata",
+    "value": [
+        {
+            "name": "Service",
+            "kind": "Singleton",
+            "url": "/redfish/v1"
+        },
+        {
+            "name": "Systems",
+            "kind": "Singleton",
+            "url": "/redfish/v1/Systems"
+        },
+        {
+            "name": "Chassis",
+            "kind": "Singleton",
+            "url": "/redfish/v1/Chassis"
+        },
+        {
+            "name": "Managers",
+            "kind": "Singleton",
+            "url": "/redfish/v1/Managers"
+        },
+        {
+            "name": "Tasks",
+            "kind": "Singleton",
+            "url": "/redfish/v1/TaskService"
+        },
+        {
+            "name": "AccountService",
+            "kind": "Singleton",
+            "url": "/redfish/v1/AccountService"
+        },
+        {
+            "name": "SessionService",
+            "kind": "Singleton",
+            "url": "/redfish/v1/SessionService"
+        },
+        {
+            "name": "EventService",
+            "kind": "Singleton",
+            "url": "/redfish/v1/EventService"
+        },
+        {
+            "name": "JsonSchemas",
+            "kind": "Singleton",
+            "url": "/redfish/v1/JSONSchemas"
+        },
+        {
+            "name": "Registries",
+            "kind": "Singleton",
+            "url": "/redfish/v1/Registries"
+        },
+        {
+            "name": "Sessions",
+            "kind": "Singleton",
+            "url": "/redfish/v1/SessionService/Sessions"
+        }
+    ]
+}

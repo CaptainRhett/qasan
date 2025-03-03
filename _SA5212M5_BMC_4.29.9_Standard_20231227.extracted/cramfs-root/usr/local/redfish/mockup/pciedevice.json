@@ -1,0 +1,8 @@
+{
+    "@odata.context": "/redfish/v1/$metadata#Chassis/Members/1/PCIeDevices/$entity",
+    "@odata.id": "/redfish/v1/Chassis/1/PCIeDevices",
+    "@odata.type": "#PCIeDeviceCollection.PCIeDeviceCollection",
+    "Name": "PCIeDevice Collection",
+    "Members@odata.count": 2,
+    "Members": []
+}

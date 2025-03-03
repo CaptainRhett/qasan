@@ -1,0 +1,20 @@
+{
+  "@odata.context": "/redfish/v1/$metadata#Chassis/Members/1/PCIeDevices/Members/PCIeCard4/Functions/Members/$entity",
+  "@odata.id": "/redfish/v1/Chassis/1/PCIeDevices/PCIeCard4/Functions/1",
+  "@odata.type": "#PCIeFunction.v1_0_1.PCIeFunction",
+  "Id": "1",
+  "Name": "Function1",
+  "DeviceId": "0x8086",
+  "VendorId": "0x10fb",
+  "SubsystemId": null,
+  "SubsystemVendorId": null,
+  "DeviceClass": "NetworkController",
+  "Oem": {
+    "Inspur": {
+      "AssociatedResource": "CPU1",
+      "BusNumber": "0x00",
+      "DeviceNumber": "0x03",
+      "FunctionNumber": "0x00"
+    }
+  }
+}

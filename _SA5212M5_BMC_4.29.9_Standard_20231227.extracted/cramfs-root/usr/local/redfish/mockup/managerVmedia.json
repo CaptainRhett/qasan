@@ -1,0 +1,21 @@
+{
+    "@odata.type": "#VmediaCollection.VmediaCollection",
+    "Name": "Vmedia Collection",
+    "Members@odata.count": 3,
+    "Id": "Vmedia",
+    "Members": [
+        {
+            "@odata.id": "/redfish/v1/Managers/1/Vmedia/General"
+        },
+          {
+            "@odata.id": "/redfish/v1/Managers/1/Vmedia/Instance"
+        },
+           {
+            "@odata.id": "/redfish/v1/Managers/1/Vmedia/Remote_configurations"
+        }
+    ],
+
+    "Oem": {},
+    "@odata.context": "/redfish/v1/$metadata#VmediaCollection.VmediaCollection",
+    "@odata.id": "/redfish/v1/Manager/1/Vmedia"
+}

@@ -1,0 +1,37 @@
+[ Sat Jan  1 00:02:47 GMT-8 2000 ] [INFO ] [ ] InfoCollect start time is:20000101_000246...
+[ Sat Jan  1 00:02:47 GMT-8 2000 ] [INFO ] [ ] User ID is:uid=0(sysadmin) gid=0(sysadmin) groups=0(sysadmin)
+[ Sat Jan  1 00:02:48 GMT-8 2000 ] [INFO ] [ ] [mkdir -p /conf/InspurDiagLogCollect_Linux_V2.3_20170317/127.0.0.1_20000101_000246] is called.
+[ Sat Jan  1 00:02:48 GMT-8 2000 ] [INFO ] [ ] [mkdir -p /conf/InspurDiagLogCollect_Linux_V2.3_20170317/127.0.0.1_20000101_000246] successfull.
+[ Sat Jan  1 00:02:48 GMT-8 2000 ] [INFO ] [ ] [echo Tools verion:V2.3] is called.
+[ Sat Jan  1 00:02:48 GMT-8 2000 ] [INFO ] [ ] [echo Tools verion:V2.3] successfull.
+[ Sat Jan  1 00:02:49 GMT-8 2000 ] [INFO ] [ ] [echo Tools Release date:2017-3-17] is called.
+[ Sat Jan  1 00:02:49 GMT-8 2000 ] [INFO ] [ ] [echo Tools Release date:2017-3-17] successfull.
+[ Sat Jan  1 00:02:49 GMT-8 2000 ] [INFO ] [ ] Module collect timeout value is:3600.
+[ Sat Jan  1 00:02:50 GMT-8 2000 ] [INFO ] [ ] Module  collect pid is:1375
+[ Sat Jan  1 00:30:08 GMT-8 2000 ] [INFO ] [ ] Module  log collect process is finished in time.
+[ Sat Jan  1 00:30:08 GMT-8 2000 ] [INFO ] [ ] [mv /conf/InspurDiagLogCollect_Linux_V2.3_20170317/modules/bmc/output /conf/InspurDiagLogCollect_Linux_V2.3_20170317/127.0.0.1_20000101_000246/bmc] is called.
+[ Sat Jan  1 00:30:09 GMT-8 2000 ] [INFO ] [ ] [mv /conf/InspurDiagLogCollect_Linux_V2.3_20170317/modules/bmc/output /conf/InspurDiagLogCollect_Linux_V2.3_20170317/127.0.0.1_20000101_000246/bmc] successfull.
+[ Sat Jan  1 00:30:09 GMT-8 2000 ] [INFO ] [ ] move /conf/InspurDiagLogCollect_Linux_V2.3_20170317/modules/bmc/output to /conf/InspurDiagLogCollect_Linux_V2.3_20170317/127.0.0.1_20000101_000246/bmc ...
+[ Sat Jan  1 00:30:09 GMT-8 2000 ] [INFO ] [ ] [mv /conf/InspurDiagLogCollect_Linux_V2.3_20170317/modules/bmc/runlog /conf/InspurDiagLogCollect_Linux_V2.3_20170317/127.0.0.1_20000101_000246/runlog_bmc] is called.
+[ Sat Jan  1 00:30:09 GMT-8 2000 ] [INFO ] [ ] [mv /conf/InspurDiagLogCollect_Linux_V2.3_20170317/modules/bmc/runlog /conf/InspurDiagLogCollect_Linux_V2.3_20170317/127.0.0.1_20000101_000246/runlog_bmc] successfull.
+[ Sat Jan  1 00:30:09 GMT-8 2000 ] [INFO ] [ ] move /conf/InspurDiagLogCollect_Linux_V2.3_20170317/modules/bmc/runlog to /conf/InspurDiagLogCollect_Linux_V2.3_20170317/127.0.0.1_20000101_000246/runlog_bmc ...
+[ Sat Jan  1 00:30:10 GMT-8 2000 ] [INFO ] [ ] [rm -rf storcli-1.15.04-1.tar.gz] is called.
+[ Sat Jan  1 00:30:10 GMT-8 2000 ] [INFO ] [ ] [rm -rf storcli-1.15.04-1.tar.gz] successfull.
+[ Sat Jan  1 00:30:10 GMT-8 2000 ] [INFO ] [ ] [rm -rf CmdTool.log] is called.
+[ Sat Jan  1 00:30:10 GMT-8 2000 ] [INFO ] [ ] [rm -rf CmdTool.log] successfull.
+[ Sat Jan  1 00:30:10 GMT-8 2000 ] [INFO ] [ ] [rm -rf MegaSAS.log] is called.
+[ Sat Jan  1 00:30:11 GMT-8 2000 ] [INFO ] [ ] [rm -rf MegaSAS.log] successfull.
+[ Sat Jan  1 00:30:11 GMT-8 2000 ] [INFO ] [ ] [rm -rf opt] is called.
+[ Sat Jan  1 00:30:11 GMT-8 2000 ] [INFO ] [ ] [rm -rf opt] successfull.
+[ Sat Jan  1 00:30:11 GMT-8 2000 ] [INFO ] [ ] [cp -f runlog /conf/InspurDiagLogCollect_Linux_V2.3_20170317/127.0.0.1_20000101_000246/runlog_main] is called.
+[ Sat Jan  1 00:30:12 GMT-8 2000 ] [INFO ] [ ] [cp -f runlog /conf/InspurDiagLogCollect_Linux_V2.3_20170317/127.0.0.1_20000101_000246/runlog_main] successfull.
+[ Sat Jan  1 00:30:12 GMT-8 2000 ] [INFO ] [ ] [chmod 400 -R __127.0.0.1_20000101_000246] is called.
+[ Sat Jan  1 00:30:14 GMT-8 2000 ] [INFO ] [ ] [chmod 400 -R __127.0.0.1_20000101_000246] successfull.
+[ Sat Jan  1 00:30:14 GMT-8 2000 ] [INFO ] [ ] [tar -czf __127.0.0.1_20000101_000246.tar.gz __127.0.0.1_20000101_000246] is called.
+[ Sat Jan  1 00:30:14 GMT-8 2000 ] [INFO ] [ ] [tar -czf __127.0.0.1_20000101_000246.tar.gz __127.0.0.1_20000101_000246] successfull.
+[ Sat Jan  1 00:30:15 GMT-8 2000 ] [INFO ] [ ] [chmod 400 __127.0.0.1_20000101_000246.tar.gz] is called.
+[ Sat Jan  1 00:30:15 GMT-8 2000 ] [INFO ] [ ] [chmod 400 __127.0.0.1_20000101_000246.tar.gz] successfull.
+[ Sat Jan  1 00:30:15 GMT-8 2000 ] [INFO ] [ ] [chmod 400 __127.0.0.1_20000101_000246.md5] is called.
+[ Sat Jan  1 00:30:16 GMT-8 2000 ] [ERROR] [ ] [chmod 400 __127.0.0.1_20000101_000246.md5] failed.Ret:1. Desc:chmod: __127.0.0.1_20000101_000246.md5: No such file or directory
+[ Sat Jan  1 00:30:16 GMT-8 2000 ] [INFO ] [ ] [rm -rf __127.0.0.1_20000101_000246] is called.
+[ Sat Jan  1 00:30:16 GMT-8 2000 ] [INFO ] [ ] [rm -rf __127.0.0.1_20000101_000246] successfull.

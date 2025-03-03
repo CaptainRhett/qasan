@@ -1,0 +1,39 @@
+{
+    "@odata.id": "/redfish/v1/Chassis/1U/Power#/PowerSupplies/0",
+    "FirmwareVersion": "1.00",
+    "InputRanges": [
+        {
+            "OutputWattage": 1300
+        }
+    ],
+    "LastPowerOutputWatts": 325,
+    "LineInputVoltage": 120,
+    "LineInputVoltageType": "ACWideRange",
+    "Manufacturer": "ManufacturerName",
+    "MemberId": "0",
+    "Model": "499253-B21",
+    "Name": "Power Supply Bay",
+    "Oem": {
+        "WorkMode": "active",
+        "StatusWord": "0x00",
+        "Temperature": 0,
+        "InputPower": 0,
+        "OutputVolt": 0,
+        "InputCurrent": 0,
+        "OutputCurrent": 0, 
+    },
+    "PowerCapacityWatts": 800,
+    "PowerSupplyType": "AC",
+    "RelatedItem": [
+        
+{
+            "@odata.id": "/redfish/v1/Chassis/1U"
+        }
+    ],
+    "SerialNumber": "1Z0000001",
+    "PartNumber": "V03101Q000000000",
+    "Status": {
+        "Health": "Warning",
+        "State": "Enabled"
+    }
+}

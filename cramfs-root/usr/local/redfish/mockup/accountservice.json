@@ -1,0 +1,21 @@
+{
+    "@odata.type": "#AccountService.v1_0_2.AccountService",
+    "Id": "AccountService",
+    "Name": "Account Service",    
+    "ServiceEnabled": "true",
+    "AccountLockoutThreshold": 5,
+    "MinPasswordLength": 16,
+    "MaxPasswordLength":20,
+    "PasswordComplexityCheckEnabled":" true",
+    "AccountLockoutDuration":0,
+    "PasswordHistoryRecords":0,
+    "PasswordValidityPeriod":0,
+    "Accounts":{
+        "@odata.id":"/redfish/v1/AccountService/Accounts"
+    },
+    "LdapService":{
+       "@odata.id":"/redfish/v1/AccountService/LdapService"
+     },
+    "@odata.context": "/redfish/v1/$metadata#AccountService.AccountService",
+    "@odata.id": "/redfish/v1/AccountService",
+}

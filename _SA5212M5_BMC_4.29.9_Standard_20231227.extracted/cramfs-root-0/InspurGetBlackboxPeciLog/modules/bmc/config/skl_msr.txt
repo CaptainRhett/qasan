@@ -1,0 +1,69 @@
+##+----------------------------------------------------------------------+
+##|                                                                      |
+##|Skylake Error Status MSR collection                                   |
+##|Format# reg name                                                      |
+##|                                                                      |
+##|   reg - Register offset(0 ~ 0xFFF)                                   |
+##|   name - Register name                                               |
+##|                                                                      |
+##+----------------------------------------------------------------------+
+0x401     IA32_MC0_STATUS   YES
+0x402     IA32_MC0_ADDR     YES
+0x403     IA32_MC0_MISC     YES
+0x405     IA32_MC1_STATUS   YES
+0x406     IA32_MC1_ADDR     YES
+0x407     IA32_MC1_MISC     YES
+0x409     IA32_MC2_STATUS   YES
+0x40A     IA32_MC2_ADDR     YES
+0x40B     IA32_MC2_MISC     YES
+0x40D     IA32_MC3_STATUS   YES
+0x40E     IA32_MC3_ADDR     YES
+0x40F     IA32_MC3_MISC     YES
+0x411     IA32_MC4_STATUS
+0x412     IA32_MC4_ADDR
+0x413     IA32_MC4_MISC
+0x415     IA32_MC5_STATUS
+0x416     IA32_MC5_ADDR
+0x417     IA32_MC5_MISC
+0x419     IA32_MC6_STATUS
+0x41A     IA32_MC6_ADDR
+0x41B     IA32_MC6_MISC
+0x41D     IA32_MC7_STATUS
+0x41E     IA32_MC7_ADDR
+0x41F     IA32_MC7_MISC
+0x421     IA32_MC8_STATUS
+0x422     IA32_MC8_ADDR
+0x423     IA32_MC8_MISC
+0x425     IA32_MC9_STATUS
+0x426     IA32_MC9_ADDR
+0x427     IA32_MC9_MISC
+0x429     IA32_MC10_STATUS
+0x42A     IA32_MC10_ADDR
+0x42B     IA32_MC10_MISC
+0x42D     IA32_MC11_STATUS
+0x42E     IA32_MC11_ADDR
+0x42F     IA32_MC11_MISC
+0x431     IA32_MC12_STATUS
+0x432     IA32_MC12_ADDR
+0x433     IA32_MC12_MISC
+0x435     IA32_MC13_STATUS
+0x436     IA32_MC13_ADDR
+0x437     IA32_MC13_MISC
+0x439     IA32_MC14_STATUS
+0x43A     IA32_MC14_ADDR
+0x43B     IA32_MC14_MISC
+0x43D     IA32_MC15_STATUS
+0x43E     IA32_MC15_ADDR
+0x43F     IA32_MC15_MISC
+0x441     IA32_MC16_STATUS
+0x442     IA32_MC16_ADDR
+0x443     IA32_MC16_MISC
+0x445     IA32_MC17_STATUS
+0x446     IA32_MC17_ADDR
+0x447     IA32_MC17_MISC
+0x449     IA32_MC18_STATUS
+0x44A     IA32_MC18_ADDR
+0x44B     IA32_MC18_MISC
+0x44D     IA32_MC19_STATUS
+0x44E     IA32_MC19_ADDR
+0x44F     IA32_MC19_MISC

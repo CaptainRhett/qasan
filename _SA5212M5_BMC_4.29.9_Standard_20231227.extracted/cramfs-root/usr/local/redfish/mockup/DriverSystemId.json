@@ -1,0 +1,24 @@
+{ 
+"@odata.context": "/redfish/v1/$metadata#Chassis/Members/1/Drives/Members/$entity",
+    "@odata.id": "/redfish/v1/Chassis/1/Drives/HDDPlaneDisk0",
+    "@odata.type": "#Drive.v1_1_0.Drive",
+    "Id": "HDDPlaneDisk0",
+    "Name": "Disk0",
+    "Model": "SDLF1DAR480G-1HHS",
+    "Status": {
+        "State": "Enabled",
+        "Health": "OK"
+    },
+    "CapacityBytes": 478998953984,
+    "CapableSpeedGbs": 12,
+    "Protocol": "SATA",
+    "MediaType": "SSD",
+    "Manufacturer": "SANDISK",
+    "PredictedMediaLifeLeftPercent": 100,
+    "Location": [
+        {
+            "Info": "Disk0",
+            "InfoFormat": "DeviceName"
+        }
+    ]
+}

@@ -1,0 +1,63 @@
+#!/bin/sh
+# /etc/init.d/dhcpmon
+#
+# chkconfig: 2345 10 90
+#Runlevel : 3 = S11
+#Runlevel : 6 = K11
+#Runlevel : 7 = K11
+#Runlevel : 8 = K11
+
+PATH=/bin:/usr/bin:/sbin:/usr/sbin
+
+test -f /usr/local/bin/dhcpmonitor || exit 0
+
+
+# adding cron entry for periodic DNS update.
+if [ -f "/etc/core_features" ]
+then
+    grep "CONFIG_SPX_FEATURE_PERIODIC_DNS_UPDATE=YES" /etc/core_features > /dev/null
+    if [ $? == 0 ]
+    then
+        grep "periodic-nsupdate" /conf/crontab > /dev/null
+        # Add Default entries in crontab files
+        if [ $? != 0 ]; then 
+            echo "Adding entry for periodic DNS update in crontab."
+            echo "  0 0 * * *     sysadmin   [ -f /etc/periodic-nsupdate ] && /etc/periodic-nsupdate" >> /conf/crontab
+            #restart CRON after adding entry.
+            if [ -f /etc/init.d/cron ]; then
+                /etc/init.d/cron restart
+            fi
+        fi
+    fi
+fi
+
+
+case "$1" in
+	start)
+		echo -n "Starting DHCP monitor"
+		/usr/local/bin/dhcpmonitor &
+		echo "."
+		;;
+	stop)
+		echo -n "Stopping DHCP monitor ..."
+		killall -1 dhcpmonitor
+		echo "."
+		;;
+	reload)
+		$0 restart
+		;;
+	force-reload)
+		$0 restart
+		;;
+	restart)
+		echo -n "Restarting DHCP monitor ..."
+		killall -1 dhcpmonitor
+		/usr/local/bin/dhcpmonitor &
+		echo "."
+		;;
+	*)
+		echo "Usage: /etc/init.d/dhcpmon {start|stop|reload|restart|force-reload}"
+		exit 1
+esac
+
+exit 0

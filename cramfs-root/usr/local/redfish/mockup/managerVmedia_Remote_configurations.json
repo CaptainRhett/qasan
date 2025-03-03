@@ -1,0 +1,28 @@
+{
+    "@odata.type": "#Vmedia_remote_configuration.Vmedia_remote_configuration",
+    "Name": "Vmedia Remote Configuration",
+    
+    "Id": "Vmedia Remote Configuration",
+    "Images":[ { "id": 1, "image_type": 1, "image_index": 0, "image_name": "Ghost_LF_Win2003.iso1" }],
+    "Configuration":[
+    	 { "id": 1,
+    	  "media_type": 1, 
+    	  "media_index": 0, 
+    	  "session_index": 255,
+    	   "image_name": "Ghost_LF_Win2003.iso1",
+    	    "redirection_status": 7 }
+    	 ],
+       "Actions": [
+        {"#Remote.StartMedia": {
+            "target": "/redfish/v1/Managers/1/Vmedia/Actions/RemoteMedia.Start"
+        }},
+         {"#Remote.StopMedia": {
+            "target": "/redfish/v1/Managers/1/Vmedia/Actions/RemoteMedia.Stop"
+        }},
+       
+    ],
+
+    "Oem": {},
+    "@odata.context": "/redfish/v1/$metadata#Vmedia_remote_configuration",
+    "@odata.id": "/redfish/v1/Manager/2/Vmedia/Remote_configurations"
+}

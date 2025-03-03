@@ -1,0 +1,25 @@
+{
+    "Id": "Backplane",
+    "Name": "Backplane",
+    "Backplaneinfo": [
+        {
+            "MemberId": "0",
+            "Name": "Backplane_0",
+            "Status": {
+                "State": "Enabled",
+                "Health": "OK"
+            },
+            "Oem": {},
+            "CpldVersion": "1.0",
+            "portnum": 0,
+            "nvmenum": 0,
+            "hddnum": 0,
+            "backplaneposition": "Front",
+            "backplanetype": "SFF",
+            "tempreature": 0,
+            "Manufacturer": "Inspur",
+        }
+    ],
+    "Oem": {},
+    "@odata.id": "/redfish/v1/Systems/System1/Storages/Diskbackplane",
+}

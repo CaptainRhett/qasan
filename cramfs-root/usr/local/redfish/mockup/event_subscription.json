@@ -1,0 +1,26 @@
+{
+  "@odata.context":   "/redfish/v1/$metadata#EventService/Subscriptions/Members/$entity",
+  "@odata.id": "/redfish/v1/EventService/Subscriptions/1",
+  "@odata.type": "#EventDestination.v1_1_1.EventDestination",
+  "Id": "1",
+  "Name": "EventSubscription 1",
+  "Destination": "https://10.10.10.191/iBMCRedfishEvents/iBMCEventReceiver.php",
+  "EventTypes": [
+    "StatusChange",
+    "ResourceUpdated",
+    "ResourceAdded",
+    "ResourceRemoved",
+    "Alert"
+  ],
+  "HttpHeaders":null,
+  "Protocol": "Redfish",
+  "Context": "event subscription test",
+  "MessageIds": [
+    "iBMCEvents.2.0.PsPredicFailureInfo"
+  ],
+  "OriginResources": [
+    {
+       "@odata.id":"/redfish/v1/Chassis/1/Power#/PowerSupplies/0"
+    }
+  ]
+}

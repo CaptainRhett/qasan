@@ -1,0 +1,14 @@
+{
+    "files.associations": {
+        "*.patch": "diff",
+        "*.code": "cpp",
+        "typeinfo": "cpp",
+        "functional": "cpp",
+        "asan-giovese-inl.h": "c",
+        "qasan-qemu.h": "c",
+        "asan-giovese.h": "c",
+        "compare": "cpp",
+        "cstdint": "cpp",
+        "features.h": "c"
+    }
+}

@@ -1,0 +1,14 @@
+{
+    "@odata.id": "/redfish/v1/Chassis/1U/Thermal#/Temperatures/0",
+    "MemberId": "0",
+    "Name": "CPU1 Temp",
+    "SensorNumber": 5,
+    "Status": {
+        "State": "Enabled",
+        "Health": "OK"
+    },
+    "ReadingCelsius": 41,
+    "UpperThresholdNonCritical": 42,
+    "UpperThresholdCritical": 45,
+    "UpperThresholdFatal": 48,
+}

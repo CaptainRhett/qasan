@@ -1,0 +1,17 @@
+{
+    "@odata.context": "/redfish/v1/$metadata#AccountService/LdapService.Configuration",
+    "@odata.id": "/redfish/v1/AccountService/LdapService/Configuration",
+    "@odata.type": "#InspurLdapService.v1_0_0.InspurLdapService",
+    "Name": "Ldap Service",
+    "Id": 1,    
+    "LdapServiceEnabled": "enable",
+    "encryption_type": "SSL",
+    "ldapport":389,
+    "server_address":"192.168.1.1",
+    "bind_dn":"cn=manager,ou=login, dc=domain,dc=com",
+    "search_base":"ou=login,dc=domain,dc=com",
+    "user_login_attribute":"cn",
+    "FQDNEnable":"false",
+    "common_name_type":"ip",
+    "password":""
+}

@@ -1,0 +1,32 @@
+##+----------------------------------------------------------------------+
+##|                                                                      |
+##|Skylake Error Status CSR collection                                   |
+##|Format# bus dev fun reg name                                          |
+##|                                                                      |
+##|   bus - Bus number(0 or 1)                                           |
+##|   dev - Device number(0 ~ 31)                                        |
+##|   fun - Function number(0 ~ 7)                                       |
+##|   reg - Register offset(0 ~ 0xFFF)                                   |
+##|   name - Register name                                               |
+##|                                                                      |
+##+----------------------------------------------------------------------+
+1     30  2    0xEC   MCA_ERR_SRC_LOG
+1     8   0    0xA4   IerrLoggingReg
+1     8   0    0xA8   MCerrLoggingReg
+1     8   0    0xe4   UBOXErrSts
+1     8   0    0x204  IIO_GSYSST
+1     8   0    0x208  IIO_GSYSCTL
+1     8   0    0x230  IIO_GC_ERRST
+1     8   0    0x224  IIO_GNF_ERRST
+1     8   0    0x218  IIO_GF_ERRST
+0     5   2    0x1cc  LSYSST
+0     5   2    0x1d0  LSYSCTL
+0     5   2    0x1a8  LCERRST
+0     5   2    0x1c0  LNERRST
+0     5   2    0x1c4  LFERRST
+0     5   0    0x1a8  VTUNCERRSTS
+0     5   2    0x288  TCERRST
+0     4   0    0x148  DMAUNCERRSTS
+1     8   1    0xb4   BIST_RESULTS
+1     8   2    0xcc   CPUBUSNO
+1     8   2    0xd0   CPUBUSNO1

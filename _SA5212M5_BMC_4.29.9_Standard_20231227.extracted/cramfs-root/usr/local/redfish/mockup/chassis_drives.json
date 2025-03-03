@@ -1,0 +1,12 @@
+{
+    "@odata.context": "/redfish/v1/$metadata#Chassis/Members/1/Drives/$entity",
+    "@odata.id": "/redfish/v1/Chassis/1/Drives",
+    "@odata.type": "#Drives.v1_0_1.Drives",
+    "Status": {
+		"State": "Enabled",
+		"Health": "OK"
+	},
+	"Members@odata.count":1,
+    "Members": []
+    }
+}

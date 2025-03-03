@@ -1,0 +1,12 @@
+{
+    "@odata.type": "#InspurLdapService.v1_0_0.InspurLdapService",
+    "Id": 1,
+    "role_group_name":"admin",
+    "role_group_domain":"",
+    "role_group_privilege":"administrator",
+    "role_group_withoem_privilege":"",
+    "role_group_kvm_privilege":"enable",
+    "role_group_vmedia_privilege":"disabled",
+    "@odata.context": "/redfish/v1/$metadata#AccountService/LdapService.RoleGroups",
+    "@odata.id": "/redfish/v1/AccountService/LdapService/RoleGroups/1",
+}

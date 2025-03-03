@@ -1,0 +1,10 @@
+ {
+      "FullDuplex": true,
+      "Name": "",
+      "SpeedMbps": 0,
+      "Status":      
+	 {
+        "Health": "OK",
+	"State": "Enabled"
+      }
+}

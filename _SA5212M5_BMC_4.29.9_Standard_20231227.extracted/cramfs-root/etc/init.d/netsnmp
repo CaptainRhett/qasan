@@ -1,0 +1,133 @@
+#!/bin/sh
+# /etc/init.d/snmpd: snmpd server
+#
+# chkconfig: 2345 25 25
+#Runlevel : 1 = K25
+#Runlevel : 3 = S92
+#Runlevel : 6 = K85
+#Runlevel : 7 = K85
+#Runlevel : 8 = K85
+# Restart the service on warm reboot
+#Runlevel : 9 = K85
+#Runlevel : 9 = S85
+APP_NAME=snmpd
+SNMPD=/conf/snmp_users.conf
+MonitorFile="/var/StartMonitor"
+
+monitorenable(){
+    if [ ! -f $MonitorFile ];then
+        touch $MonitorFile
+    fi  
+}
+
+monitordisable(){
+    if [ -f $MonitorFile ];then
+        rm $MonitorFile
+    fi  
+}
+
+removeUserEntry() {
+
+                # Removal of createUser entry if exist
+                sed -i '/createUser/d' ${SNMPD}
+
+                # Removal of empty rows in file
+                TMP="/tmp/snmp_users##.conf"
+                sed '/^$/d' ${SNMPD} > $TMP
+                mv -f $TMP ${SNMPD}
+                sleep 5 
+                cp ${SNMPD} /var/snmpd.conf
+}
+
+monitordisable
+
+PATH=/bin:/usr/bin:/sbin:/usr/sbin
+
+APP_PATH=/usr/sbin/$APP_NAME
+APP_OPTION="-c /var/snmpd.conf -L"
+#APP_PARAM=" udp:161,udp6:161"
+UDP_PORT=161
+UDP6_PORT=161
+SNMP_RUNSTATUS=y
+
+if [ -f  "/conf/inspur_snmpcfg.conf" ]
+then
+    . /conf/inspur_snmpcfg.conf
+    echo "netsnmp script: inspur_snmpcfg.conf found."
+else
+    echo "netsnmp script: inspur_snmpcfg.conf not found, use default."
+    #APP_PARAM=" udp:161,udp6:161"
+fi
+
+APP_PARAM=" udp:$UDP_PORT,udp6:$UDP6_PORT"
+
+echo "snmp port Param:$APP_PARAM"
+
+test -f /usr/sbin/$APP_NAME || exit 0
+
+#export MIBS=UDP-MIB:TCP-MIB:AMI-DEMO-MIB
+export MIBS=ALL
+MIBDIRS=/usr/share/snmp/mibs
+#export MIBDIRS=/conf/
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/:/usr/local/lib/
+export SNMP_PERSISTENT_DIR=/conf/snmp
+
+# Options for start/restart the daemons
+case "$1" in
+  start)
+    if [ "$SNMP_RUNSTATUS" == 'no'  -o "$SNMP_RUNSTATUS" == 'n' ]
+    then
+        echo "netsnmp status: $SNMP_RUNSTATUS, do not run snmp service."
+        exit 0
+    fi
+    if [ -f /var/snmp_service_status ]
+    then
+  	echo -n "Not Start SNMP Daemons : $APP_NAME"
+    else
+    	echo -n "Starting SNMP Daemons : $APP_NAME"
+    	/usr/local/bin/snmp_init_conf 
+    	cp /conf/snmp_users.conf /var/snmpd.conf
+    	start-stop-daemon --start --quiet --exec $APP_PATH -- $APP_OPTION $APP_PARAM
+    fi
+    monitorenable
+    echo "."
+    ;;
+  stop)
+    echo -n "Stopping SNMP Daemons : $APP_NAME"
+    start-stop-daemon --stop --quiet --exec $APP_PATH
+    monitordisable
+    echo "."
+    ;;
+    reload)
+        echo -n "Reloading SNMP Daemons : $APP_NAME"
+        start-stop-daemon --stop --quiet --exec $APP_PATH --signal 1
+        echo "."
+        ;;
+    force-reload)
+        $0 reload
+        ;;
+    restart)
+        echo -n "Restarting SNMP Daemons: $APP_NAME"
+        if [ "$SNMP_RUNSTATUS" == 'no'  -o "$SNMP_RUNSTATUS" == 'n' ]
+        then
+            echo "netsnmp status: $SNMP_RUNSTATUS, do not run snmp service."
+            exit 0
+        fi
+        /usr/local/bin/snmp_init_conf
+        cp /conf/snmp/snmpd.conf /var/tmp/snmpd_pwd.bkup
+        start-stop-daemon --stop --quiet --oknodo --exec $APP_PATH
+        cp /conf/snmp_users.conf /var/snmpd.conf
+        cp /var/tmp/snmpd_pwd.bkup /conf/snmp/snmpd.conf
+        sleep 1
+        start-stop-daemon --start --quiet --exec $APP_PATH -- $APP_OPTION $APP_PARAM
+        monitorenable
+        echo "."
+        removeUserEntry
+        ;;
+   *)
+    echo "Usage: /etc/init.d/$APP_NAME {start|stop|reload|restart|force-reload}"
+    exit 1
+esac
+
+exit 0
+

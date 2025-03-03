@@ -1,0 +1,12 @@
+{
+    "@odata.context": "/redfish/v1/$metadata#Chassis/Members/1/PCIeDevices/Members/$entity",
+    "@odata.id": "/redfish/v1/Chassis/1/PCIeDevices/mainboardPCIeCard4",
+    "@odata.type": "#PCIeDevice.v1_0_1.PCIeDevice",
+    "Id": "mainboardPCIeCard4",
+    "Status": {
+		"State": "Disable",
+		"Health": "NA"
+	},
+    "Manufacturer": "Intel Corporation",
+    "Model": null,
+}

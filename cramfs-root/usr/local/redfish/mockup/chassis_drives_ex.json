@@ -1,0 +1,8 @@
+{
+    "@odata.context": "/redfish/v1/$metadata#Chassis/Members/1/Drives/$entity",
+    "@odata.id": "/redfish/v1/Chassis/1/Drives",
+    "@odata.type": "#DrivesCollection.DrivesCollection",
+    "Name": "Drives Collection",
+    "Members@odata.count":1,
+    "Members": []
+}

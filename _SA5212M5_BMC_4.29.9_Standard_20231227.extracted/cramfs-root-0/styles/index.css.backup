@@ -1,0 +1,82 @@
+ body {
+        padding-top: 40px;
+        padding-bottom: 40px;
+        /*font-family: "Helvetica Neue", Helvetica, Arial, "Microsoft Yahei UI", "Microsoft YaHei", SimHei, "\5B8B\4F53", simsun, sans-serif;*/
+        font-family: "ff-tisa-web-pro-1","ff-tisa-web-pro-2","Lucida Grande","Helvetica Neue",Helvetica,Arial,"Hiragino Sans GB","Hiragino Sans GB W3","Microsoft YaHei UI","Microsoft YaHei","WenQuanYi Micro Hei",sans-serif;
+      }
+.sidebar-nav 
+      {
+        padding: 0px 0;
+      }
+
+@media (max-width: 979px) {
+
+        body {
+          padding-top: 0px;
+        }
+
+        /* Enable use of floated navbar text */
+        .navbar-text.pull-right {
+          float: none;
+          padding-left: 0px;
+          padding-right: 5px;
+        }
+
+        .nav-collapse .nav > li > a,
+        .nav-collapse .dropdown-menu a {
+         /*color:#77f8af; */
+        }
+      }
+
+
+/*custom theme*/
+@media (min-width: 1200px){
+  #leftNavBar{
+    position: fixed;
+    width: 300px;
+    height: 1200px;
+  }
+}
+
+@media (min-width: 979px) and (max-width: 1200px){
+  #leftNavBar{
+    position: fixed;
+    width: 250px;
+    height: 1200px;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 979px) {
+        .navbar-fixed-top {
+          margin-bottom: 0px;
+        }
+        #leftNavBar{
+          position: fixed;
+          width: 200px;
+          height: 1200px;
+        }
+}
+
+.nav-header{
+        font-size: 15px;
+      }
+
+#leftNavBar > .nav-header > a {
+  font-weight: 500;
+}
+
+thead {
+  background-color: white;
+}
+
+.gray-color{
+    color:gray;
+  }
+
+.btn-div{
+  max-width: 400px; 
+  margin: 10px auto 10px;
+}
+.accordion-group{
+      border: 0px;
+    }

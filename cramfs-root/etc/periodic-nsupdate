@@ -1,0 +1,2 @@
+#! /bin/sh
+for IFACE in `ifconfig | grep "Link encap:Ethernet" | awk -F " " '{print $1}'`; do IP=`/sbin/ifconfig $IFACE |  grep "inet addr:" | cut -d: -f2 | awk '{ print $1}'`; IPv6=`/sbin/ifconfig $IFACE | grep inet6 | grep -v Scope:Link | awk '{print $3}' |cut -d'/' -f1`; if [[ "$IP" || "$IPV6" ]]; then export IFACE=$IFACE; /etc/network/if-up.d/95-up-nsupdate; fi; done

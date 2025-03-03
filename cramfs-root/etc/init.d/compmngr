@@ -1,0 +1,55 @@
+# /etc/init.d/compmngr: start component manager
+#
+# chkconfig: 2345 10 90
+#Runlevel : 3 = S81
+# Restart the service on warm reboot
+#Runlevel : 9 = K81
+#Runlevel : 9 = S35
+PATH=/bin:/usr/bin:/sbin:/usr/sbin
+
+PATHFUL_COMPMNGR="/usr/local/bin/compmanager"
+COMPMNGR_PIPE="/var/pipe/comp_req_pipe"
+COMPMNGR_REPLY_PIPE="/var/pipe/comp_res_pipe"
+
+
+test -f /usr/local/bin/compmanager || exit 0
+
+
+# Options for start/restart the daemons
+#
+
+
+#
+#Removing component manager pipes while stoping the process
+remove_compmngr_pipes()
+{
+    test ! -p $COMPMNGR_PIPE ||rm -f $COMPMNGR_PIPE
+    test ! -p $COMPMNGR_REPLY_PIPE ||rm -f $COMPMNGR_REPLY_PIPE
+}
+
+case "$1" in
+  start)
+    echo "Starting Component Manager."
+    #start-stop-daemon --start --quiet --exec $PATHFUL_COMPMNGR 
+    cd /usr/local/bin
+    ./compmanager&
+    ;;
+  stop)
+    echo "Stopping Component Manager."
+    start-stop-daemon --stop --quiet --exec $PATHFUL_COMPMNGR
+    remove_compmngr_pipes
+    ;;
+  restart)
+    echo "Restarting Component Manager"
+#    start-stop-daemon --stop --quiet --exec $PATHFUL_COMPMNGR
+    cd /usr/local/bin
+    ./compmanager&
+    remove_compmngr_pipes
+    start-stop-daemon --start --quiet --exec $PATHFUL_COMPMNGR
+    ;;
+   *)
+    echo "Usage: /etc/init.d/compmngr {start|stop|restart}"
+    exit 1
+esac
+
+exit 0

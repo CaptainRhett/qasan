@@ -1,0 +1,59 @@
+{
+    "@odata.type": "#Manager.v1_1_0.Manager",
+    "Id": "1",
+    "Name": "Manager",
+    "ManagerType": "BMC",
+    "Description": "Contoso BMC",
+    "ServiceEntryPointUUID": "92384634-2938-2342-8820-489239905423",
+    "UUID": "58893887-8974-2487-2389-841168418919",
+    "Model": "Joo Janta 200",
+    "DateTime": "2015-03-13T04:14:33+06:00",
+    "DateTimeLocalOffset": "+06:00",
+    "Status": {
+    "Health": "Ok",
+    "State": "Enabled"
+  },
+    "Vmedia":{
+            "@odata.id": "/redfish/v1/Managers/437XR1138R2/Vmedia"
+    },
+    "GraphicalConsole": {
+        "ServiceEnabled": true,
+        "MaxConcurrentSessions": 2,
+        "ConnectTypesSupported": [
+            "KVMIP"
+        ]
+    },
+    "FirmwareVersion": "1.00",
+    "Links": {
+        "ManagerForServers": [
+            {
+                "@odata.id": "/redfish/v1/Systems/437XR1138R2"
+            }
+        ],
+        "ManagerForChassis": [
+            {
+                "@odata.id": "/redfish/v1/Chassis/1U"
+            }
+        ],
+        "ManagerInChassis": {
+            "@odata.id": "/redfish/v1/Chassis/1U"
+        },	
+        "Oem": {}
+    },
+    "Actions": {
+        "#Manager.Reset": {
+            "target": "/redfish/v1/Managers/1/Actions/Manager.Reset",
+            "ResetType@Redfish.AllowableValues": [
+                "ForceRestart",
+                "GracefulRestart"
+            ]
+        },
+        "Oem": {}
+    },
+    "Oem": {},
+      "EthernetInterfaces": {
+    "@odata.id": "/redfish/v1/Managers/1/EthernetInterfaces"
+    },
+    "@odata.context": "/redfish/v1/$metadata#Manager.Manager",
+    "@odata.id": "/redfish/v1/Managers/1",
+}

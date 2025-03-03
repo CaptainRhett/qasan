@@ -1,0 +1,11 @@
+{
+  "@odata.context": "/redfish/v1/$metadata#Chassis/Members/1/NetworkAdapters/Members/NetworkPorts/Members/$entity",
+  "@odata.id": "/redfish/v1/Chassis/1/NetworkAdapters/outboardPCIeCard1/NetworkPorts/1",
+  "@odata.type": "#NetworkPort.v1_0_0.NetworkPort",
+  "Name": "1",
+  "Id": "1",
+  "PhysicalPortNumber": "1",
+  "LinkStatus": "Down",
+  "AssociatedNetworkAddresses": [],
+  "Oem": {}
+}

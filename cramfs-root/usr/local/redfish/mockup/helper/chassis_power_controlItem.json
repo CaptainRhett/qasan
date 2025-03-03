@@ -1,0 +1,11 @@
+{
+    "@odata.id": "/redfish/v1/Chassis/1/Power#/PowerControl/0",
+    "MemberId": "0",
+    "Name": "System Power Control 1",
+    "PowerConsumedWatts": 0,
+    "PowerCapacityWatts": null,
+    "PowerLimit": {
+        "LimitInWatts": null,
+        "LimitException": "NoAction"
+    }
+ }

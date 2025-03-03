@@ -1,0 +1,9 @@
+{
+    "@odata.type": "#VmediaGenenral.VmediaGeneral",
+    "Name": "Vmedia General",
+    "Id": "Vmedia",
+
+    "Oem": {},
+    "@odata.context": "/redfish/v1/$metadata#VmediaGeneral.VmediaGeneral",
+    "@odata.id": "/redfish/v1/Manager/1/Vmedia/General"
+}

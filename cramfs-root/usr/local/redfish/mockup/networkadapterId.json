@@ -1,0 +1,74 @@
+{
+  "@odata.context": "/redfish/v1/$metadata#Systems/Members/1/NetworkAdapters/Members/$entity",
+  "@odata.id": "/redfish/v1/Systems/1/NetworkAdapters/1/",
+  "@odata.type": "#InspurBaseNetworkAdapter.v2_0_0.InspurBaseNetworkAdapter",  
+  "Firmware":   {},
+  "Id": "1",
+  "Name": "Ethernet Connection X722 (Intel Corporation)- NIC",  
+"PhysicalPorts": 
+  [    {
+      "FullDuplex": true,
+      "MacAddress": "fc:15:b4:97:89:82",
+      "Name": "",
+      "Oem":       {
+        "Inspur":         {
+          "@odata.type": "#InspurBaseNetworkAdapterExt.v2_0_0.InspurBaseNetworkAdapterExt",
+          "BadReceives": 0,
+          "BadTransmits": 0,
+          "GoodReceives": 5818,
+          "GoodTransmits": 0
+        }
+      },
+      "SpeedMbps": 0,
+      "Status":       {
+        "Health": "OK"
+      }
+    },    {
+      "FullDuplex": true,
+      "MacAddress": "fc:15:b4:97:89:83",
+      "Name": "",
+      "Oem":       {
+        "Inspur":         {
+          "@odata.type": "#InspurBaseNetworkAdapterExt.v2_0_0.InspurBaseNetworkAdapterExt",
+          "BadReceives": 0,
+          "BadTransmits": 0,
+          "GoodReceives": 0,
+          "GoodTransmits": 0
+        }
+      },
+      "SpeedMbps": 0
+    },    {
+      "FullDuplex": true,
+      "MacAddress": "fc:15:b4:97:89:84",
+      "Name": "",
+      "Oem":       {
+        "Inspur":         {
+          "@odata.type": "#InspurBaseNetworkAdapterExt.v2_0_0.InspurBaseNetworkAdapterExt",
+          "BadReceives": 0,
+          "BadTransmits": 0,
+          "GoodReceives": 0,
+          "GoodTransmits": 0
+        }
+      },
+      "SpeedMbps": 0
+    },    {
+      "FullDuplex": true,
+      "MacAddress": "fc:15:b4:97:89:85",
+      "Name": "",
+      "Oem":       {
+        "Inspur":         {
+          "@odata.type": "#InspurBaseNetworkAdapterExt.v2_0_0.InspurBaseNetworkAdapterExt",
+          "BadReceives": 0,
+          "BadTransmits": 0,
+          "GoodReceives": 0,
+          "GoodTransmits": 0
+        }
+      },
+      "SpeedMbps": 0
+    }
+  ],  "Status":   {
+    "State": "Enabled",
+    "Health": "OK"
+  },
+  "UEFIDevicePath": "PciRoot(0x0)/Pci(0x1C,0x0)/Pci(0x0,0x0)"
+}

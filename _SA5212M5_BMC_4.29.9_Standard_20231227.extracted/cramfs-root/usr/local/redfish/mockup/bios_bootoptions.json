@@ -1,0 +1,11 @@
+{
+  "@odata.context": "/redfish/v1/$metadata#Bios.Bios",
+  "@odata.id": "/redfish/v1/systems/system1/bios/boot/",
+  "Attributes":   {
+    "enable": 1,
+    "Timeliness": 0,
+    "Boot_Option": 0,
+  },
+  "Id": "boot options",
+  "Name": "BIOS Current Boot Options"
+}

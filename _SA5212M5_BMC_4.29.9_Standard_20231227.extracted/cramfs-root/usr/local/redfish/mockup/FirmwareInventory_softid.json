@@ -1,0 +1,15 @@
+{
+    "@odata.context": "/redfish/v1/$metadata#UpdateService/firmwareinventory/members/$entity",
+    "@odata.id": "/redfish/v1/UpdateService/FirmwareInventory/softid",
+    "@odata.type": "#SoftwareInventory.v1_0_0.SoftwareInventory",
+    "Id": "ActiveBMC",
+    "Name": "ActiveBMC",
+     "Status": {
+       "Health": "OK", 
+       "State": "Enabled" 
+     },
+    "Version": "2.24.0",
+    "Updateable": "true", 
+    "SoftwareId": "BMC-iBMC",
+    "ImageSizeBytes": 33554432  
+}

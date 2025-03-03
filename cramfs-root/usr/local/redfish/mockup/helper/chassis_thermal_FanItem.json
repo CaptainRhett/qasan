@@ -1,0 +1,23 @@
+{
+    "@odata.id": "/redfish/v1/Chassis/1U/Thermal#/Fans/0",
+    "MemberId": "0",
+    "Name": "BaseBoard System Fan",
+    "Status": {
+        "State": "Enabled",
+        "Health": "OK"
+    },
+    "Reading": 2100,
+     "Oem": {
+        "Inspur": {
+          "SpeedRatio": 44
+        }
+        },
+    "RelatedItem": [
+        {
+            "@odata.id": "/redfish/v1/Systems/437XR1138R2"
+        },
+        {
+            "@odata.id": "/redfish/v1/Chassis/1U"
+        }
+    ]
+}

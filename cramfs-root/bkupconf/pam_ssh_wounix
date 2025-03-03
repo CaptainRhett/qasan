@@ -1,0 +1,22 @@
+auth       required     /lib/security/pam_tally2.so deny=5 unlock_time=300  even_deny_root
+auth       sufficient   /lib/security/pam_unix.so try_first_pass
+auth       [success=done new_authtok_reqd=done cred_expired=done default=ignore]   /lib/security/pam_ipmi.so
+account    sufficient   /lib/security/pam_unix.so
+account    sufficient   /lib/security/pam_ipmi.so
+password   sufficient   /lib/security/pam_unix.so use_first_pass
+password   sufficient   /lib/security/pam_ipmi.so
+session    required     /lib/security/pam_unix.so
+session    sufficient   /lib/security/pam_ipmi.so
+auth       sufficient   /lib/security/pam_custom_ldap.so use_first_pass
+account    sufficient   /lib/security/pam_custom_ldap.so
+password   sufficient   /lib/security/pam_custom_ldap.so
+session    sufficient   /lib/security/pam_custom_ldap.so
+auth       sufficient   /lib/security/pam_custom_ad.so use_first_pass
+account    sufficient   /lib/security/pam_custom_ad.so
+password   sufficient   /lib/security/pam_custom_ad.so
+session    sufficient   /lib/security/pam_custom_ad.so
+auth       sufficient   /lib/security/pam_custom_radius.so use_first_pass
+account    sufficient   /lib/security/pam_custom_radius.so
+password   sufficient   /lib/security/pam_custom_radius.so
+session    sufficient   /lib/security/pam_custom_radius.so
+auth       required     /lib/security/pam_deny.so

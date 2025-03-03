@@ -1,0 +1,10 @@
+{
+  "@odata.context":"/redfish/v1/$metadata#LldpService.LldpService",  
+  "@odata.id": "/redfish/v1/Managers/1/LldpService",				
+  "@odata.type": "#LldpService.v1_0_0.LldpService",
+  "Description": "LLDP Service",
+  "Name": "LldpService",
+  "Id": "LldpService",
+  "LldpEnabled": false,	
+  "WorkMode": "Tx",
+}
