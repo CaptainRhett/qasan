@@ -9,6 +9,14 @@
         "asan-giovese.h": "c",
         "compare": "cpp",
         "cstdint": "cpp",
-        "features.h": "c"
+        "features.h": "c",
+        "array": "cpp",
+        "ratio": "cpp",
+        "tuple": "cpp",
+        "type_traits": "cpp",
+        "utility": "cpp",
+        "qasan.h": "c",
+        "tcg.h": "c",
+        "unistd.h": "c"
     }
 }

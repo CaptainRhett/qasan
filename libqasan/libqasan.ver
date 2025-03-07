@@ -1,0 +1,8 @@
+GLIBC_2.13 {
+    dlopen;
+    dlsym;
+    pthread_attr_getguardsize;
+    pthread_attr_setguardsize;
+    pthread_condattr_getclock;
+    pthread_condattr_setclock;
+};

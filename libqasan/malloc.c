@@ -135,6 +135,7 @@ static int quanratine_push(struct chunk_begin* ck) {
   return 1;
 
 }
+extern int calling_times = 0;
 
 void __libqasan_init_malloc(void) {
 
@@ -164,6 +165,7 @@ size_t __libqasan_malloc_usable_size(void* ptr) {
 }
 
 void* __libqasan_malloc(size_t size) {
+  // fprintf(stderr,"[Y]Calling malloc from qasan.\n");
 
   if (!__libqasan_malloc_initialized) {
   
@@ -213,6 +215,8 @@ void* __libqasan_malloc(size_t size) {
 }
 
 void __libqasan_free(void* ptr) {
+  calling_times -= 1;
+  // fprintf(stderr,"[Y]Calling free from qasan.\n");
 
   if (!ptr) return;
   

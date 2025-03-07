@@ -1,28 +1,77 @@
+# qemu build指令
+./build.py --cross=arm-linux-gnueabi-gcc --arch=arm --debug
+
 # 使用qasan检测spx_restservice软件
 指令
-./qasan-qemu -L /home/wuhuang/fuzz/qasan/cramfs-root -E LD_PRELOAD=/home/wuhuang/fuzz/qasan/host-libs/libqasan.so ./spx_restservice
+./qasan-qemu -L /home/wuhuang/fuzz/qasan/cramfs-root -E LD_PRELOAD=/home/wuhuang/fuzz/qasan/libqasan/libqasan.so ./spx_restservice
  报错
  ./spx_restservice: /lib/arm-linux-gnueabi/libc.so.6: version `GLIBC_2.34' not found (required by /home/wuhuang/fuzz/qasan/host-libs/libqasan.so)
  ./spx_restservice: /lib/arm-linux-gnueabi/libc.so.6: version `GLIBC_2.38' not found (required by /home/wuhuang/fuzz/qasan/host-libs/libqasan.so)
 
 指令
-./qasan-qemu 
-    -E LD_PRELOAD=/home/wuhuang/fuzz/qasan/host-libs/libqasan.so 
-    ./spx_restservice 
+./qasan-qemu -E LD_PRELOAD=/home/wuhuang/fuzz/qasan/host-libs/libqasan.so ./spx_restservice 
  报错
  ./spx_restservice: error while loading shared libraries: libsafesystem.so.2: cannot open shared object file: No such file or directory
 
 指令
-./qasan-qemu 
-    -E LD_PRELOAD=/home/wuhuang/fuzz/qasan/host-libs/libqasan.so 
-    -L /home/wuhuang/fuzz/qasan/cramfs-root 
-    ./spx_restservice
+./qasan-qemu -E LD_PRELOAD=/home/wuhuang/fuzz/qasan/libqasn/libqasan.so -L /home/wuhuang/fuzz/qasan/cramfs-root ./spx_restservice
  报错
  ./spx_restservice: /lib/arm-linux-gnueabi/libc.so.6: version `GLIBC_2.34' not found (required by /home/wuhuang/fuzz/qasan/host-libs/libqasan.so)
  ./spx_restservice: /lib/arm-linux-gnueabi/libc.so.6: version `GLIBC_2.38' not found (required by /home/wuhuang/fuzz/qasan/host-libs/libqasan.so)
 
+指令
+./qasan-qemu -E LD_PRELOAD=/usr/local/lib/afl/libqasan.so -L /home/wuhuang/fuzz/qasan/cramfs-root -g 1234./spx_restservice
+ERROR: ld.so: object '/usr/local/lib/afl/libqasan.so' from LD_PRELOAD cannot be preloaded: ignored.
+[1133996 : 1133996 CRITICAL][rest.c:1103]Error while terminating web session!
+[1133996 : 1133998 INFO][Info]: InspurWebMonitorTask Is Created Sucessfully!
+
+content-type: text/html
+
+./qasan-qemu -E LD_PRELOAD=/home/wuhuang/fuzz/qasan/libqasan/libqasan.so -L /home/wuhuang/fuzz/qasan/cramfs-root ./spx_restservice
+/home/wuhuang/fuzz/qasan/libqasan/libqasan.so
 # 尝试解决
-## 使用固件环境编译libqasan:
+## 使用更早期的编译器
+我在linaro上找到路更早的版本（是该网站提供的最早的版本），并使用其编译libqasan：
+指令：
+/home/wuhuang/fuzz/qasan/gcc-linaro-4.9-2016.02-x86_64_arm-linux-gnueabi/bin/arm-linux-gnueabi-gcc -fPIC -shared -I ../include/ libqasan.c hooks.c malloc.c string.c uninstrument.c 
+报错：
+patch.c dlmalloc.c -o libqasan.so -ldl -pthread
+patch.c: In function 'find_libc':
+patch.c:159:20: warning: cast to pointer from integer of different size [-Wint-to-pointer-cast]
+       libc_start = (void*)min;
+                    ^
+patch.c:160:18: warning: cast to pointer from integer of different size [-Wint-to-pointer-cast]
+       libc_end = (void*)max;
+                  ^
+patch.c: In function '__libqasan_hotpatch':
+patch.c:212:12: error: 'explicit_bzero' undeclared (first use in this function)
+   HOTPATCH(explicit_bzero)
+            ^
+patch.c:197:57: note: in definition of macro 'HOTPATCH'
+   if (p_##fn) __libqasan_patch_jump(p_##fn, (uint8_t*)&(fn));
+                                                         ^
+patch.c:212:12: note: each undeclared identifier is reported only once for each function it appears in
+   HOTPATCH(explicit_bzero)
+            ^
+patch.c:197:57: note: in definition of macro 'HOTPATCH'
+   if (p_##fn) __libqasan_patch_jump(p_##fn, (uint8_t*)&(fn));
+
+
+arm-linux-gnueabi-gcc -std=c11 -fPIC -shared -Wint-to-pointer-cast -I../include -I/home/wuhuang/fuzz/qasan/glibc-2.13/include  -Wl,--rpath=/home/wuhuang/fuzz/qasan/glibc-2.13/lib -Wl,--dynamic-linker=/home/wuhuang/fuzz/qasan/glibc-2.13/lib/ld-linux.so.2 libqasan.c hooks.c malloc.c string.c uninstrument.c patch.c dlmalloc.c -o libqasan.so -ldl -pthread
+## 使用LD_LIB环境参数变异
+LD_LIBRARY_PATH=/home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi arm-linux-gnueabi-gcc  -fPIC -shared -I ../include libqasan.c hooks.c malloc.c string.c uninstrument.c patch.c dlmalloc.c -o libqasan.so -ldl -pthread
+无效
+LD_LIBRARY_PATH=/home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi arm-linux-gnueabi-gcc  -L /home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi -Wl,--dynamic-linker=/home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi/ld-2.13.so  -Wl,-rpath=/home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi -fPIC -shared -I ../include libqasan.c hooks.c malloc.c string.c uninstrument.c patch.c dlmalloc.c -o libqasan.so -ldl -pthread
+无效
+
+
+## 下载了glibc2.13
+LD_LIBRARY_PATH=/home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi arm-linux-gnueabi-gcc -fPIC -shared -I /home/wuhuang/fuzz/qasan/glibc-2.13/include -I /home/wuhuang/fuzz/qasan/glibc-2.13 -L /home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi -Wl,--dynamic-linker=/home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi/ld-2.13.so  -Wl,-rpath=/home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi libqasan.c hooks.c malloc.c string.c uninstrument.c patch.c dlmalloc.c -o libqasan.so -ldl -pthread
+报错
+
+LD_LIBRARY_PATH=/home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi arm-linux-gnueabi-gcc -fPIC -shared -I /home/wuhuang/fuzz/qasan/glibc-2.13/include -L /home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi -Wl,--dynamic-linker=/home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi/ld-2.13.so  -Wl,-rpath=/home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi libqasan.c hooks.c malloc.c string.c uninstrument.c patch.c dlmalloc.c -o libqasan.so -ldl -pthread
+
+## 调整编译参数，使用固件环境编译libqasan:
 
 修改makefile
 CC := arm-linux-gnueabi-gcc
@@ -40,7 +89,7 @@ debug: $(HDR) $(SRC)
 
 无效
 
-## 静态编译libqasan：
+## 调整编译参数，静态编译libqasan：
 修改makefile
 CC := arm-linux-gnueabi-gcc
 CFLAGS += -Wno-int-to-void-pointer-cast -ggdb -static
@@ -86,8 +135,103 @@ collect2: error: ld returned 1 exit status
 make: *** [Makefile:9: all] Error 1
 
 解析：如果你要生成一个动态库（.so），不应该使用 -static。移除 CFLAGS 中的 -static 选项
+## 使用 -static-libgcc重新编译
+CC := arm-linux-gnueabi-gcc
+CFLAGS +=  -static-libgcc
+LDFLAGS += -ldl -pthread
+SRC := libqasan.c hooks.c malloc.c string.c uninstrument.c patch.c dlmalloc.c
+HDR := libqasan.h
+
+all: $(HDR) $(SRC)
+	$(CC) $(CFLAGS) -fPIC -shared -I ../include $(SRC) -o libqasan.so $(LDFLAGS)
+
+debug: $(HDR) $(SRC)
+	$(CC) $(CFLAGS) -DDEBUG=1 -fPIC -shared -I ../include $(SRC) -o libqasan.so $(LDFLAGS)
+
+./qasan-qemu -E LD_PRELOAD=/home/wuhuang/fuzz/qasan/libqasan/libqasan.so -L /home/wuhuang/fuzz/qasan/cramfs-root ./spx_restservice
+ ./spx_restservice: /lib/arm-linux-gnueabi/libc.so.6: version `GLIBC_2.34' not found (required by /home/wuhuang/fuzz/qasan/libqasan/libqasan.so)
+ ./spx_restservice: /lib/arm-linux-gnueabi/libc.so.6: version `GLIBC_2.38' not found (required by /home/wuhuang/fuzz/qasan/libqasan/libqasan.so)
+
+## 使用patchelf
 
 ## 分析
+### qemu运行参数设定
+./qemu-arm -L /usr/arm-linux-gnueabi/ ./test/vuln
+其中-L参数用于指定vuln程序依赖的动态运行库目录
+./qasan-qemu -L /home/wuhuang/fuzz/qasan/cramfs-root -E LD_PRELOAD=/home/wuhuang/fuzz/qasan/host-libs/libqasan.so ./spx_restservice
+
+运行qemu时，用 `-E LD_PRELOAD=/home/wuhuang/fuzz/qasan/host-libs/libqasan.so` 
+qemu会解析`-E`选项，调用`handle_arg_set_env()`函数 
+```
+// qemu/linux-user/main.c
+static void handle_arg_set_env(const char *arg)
+{
+    char *r, *p, *token;
+    r = p = strdup(arg);
+    while ((token = strsep(&p, ",")) != NULL) {
+        if (envlist_setenv(envlist, token) != 0) {
+            usage(EXIT_FAILURE);
+        }
+    }
+    free(r);
+}
+```
+解析`-E LD_PRELOAD=libqasan.so`时，调用`envlist_setenv()`函数，将`LD_PRELOAD=libqasan.so`存入`envlist`
+```
+// qemu/util/envlist.c
+/*
+ * Sets environment value to envlist in similar manner
+ * than putenv(3).
+ *
+ * Returns 0 in success, errno otherwise.
+ */
+int
+envlist_setenv(envlist_t *envlist, const char *env)
+{
+	struct envlist_entry *entry = NULL;
+	const char *eq_sign;
+	size_t envname_len;
+
+	if ((envlist == NULL) || (env == NULL))
+		return (EINVAL);
+
+	/* find out first equals sign in given env */
+	if ((eq_sign = strchr(env, '=')) == NULL)
+		return (EINVAL);
+	envname_len = eq_sign - env + 1;
+
+	/*
+	 * If there already exists variable with given name
+	 * we remove and release it before allocating a whole
+	 * new entry.
+	 */
+	for (entry = envlist->el_entries.lh_first; entry != NULL;
+	    entry = entry->ev_link.le_next) {
+		if (strncmp(entry->ev_var, env, envname_len) == 0)
+			break;
+	}
+
+	if (entry != NULL) {
+		QLIST_REMOVE(entry, ev_link);
+		g_free((char *)entry->ev_var);
+		g_free(entry);
+	} else {
+		envlist->el_count++;
+	}
+
+	entry = g_malloc(sizeof(*entry));
+	entry->ev_var = g_strdup(env);
+	QLIST_INSERT_HEAD(&envlist->el_entries, entry, ev_link);
+
+	return (0);
+}
+```
+
+在主函数中，用`envlist_to_environ()`函数加载`envlist`中的内容到`target_environ`中，再用`loader_exec()`加载程序
+当 loader_exec 加载目标程序时，目标程序的动态链接器（如 ld-linux.so）会解析 target_environ 中的 LD_PRELOAD 变量。
+如果 target_environ 包含 LD_PRELOAD=libqasan.so，动态链接器会自动加载该库到目标程序的地址空间。
+
+
 ### 读取spx_restservice所需的glibc版本
 arm-linux-gnueabi-readelf -s spx_restservice | grep GLIB
     63: 00026f3c     0 FUNC    GLOBAL DEFAULT  UND lo[...]@GLIBC_2.4 (2)
@@ -241,3 +385,118 @@ file /home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi/libc.so.6
 
 file /home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi/libc-2.13.so
 /home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi/libc-2.13.so: ELF 32-bit LSB shared object, ARM, EABI5 version 1 (SYSV), dynamically linked, interpreter /lib/ld-linux.so.3, BuildID[sha1]=1dde31309272b7cf7366082a84e01aa23825bbfa, for GNU/Linux 2.6.26, stripped
+
+arm官网上能找到的最旧的arm-linux-guneabi工具链支持的使用的glibc版本是2.28 但是环境中的glibc版本是2.13
+
+
+
+
+arm-linux-gnueabi-gcc -fPIC -shared -I ../include libqasan.c hooks.c malloc.c string.c uninstrument.c patch.c dlmalloc.c -o libqasan.so -ldl -pthread  -L/home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi -Wl,--dynamic-linker=/home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi/ld-2.13.so  -Wl,-rpath=/home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi
+
+
+# 最新的编译：
+./build.py --arch=arm --debug --cross=/home/wuhuang/fuzz/qasan/gcc-linaro-4.9-2016.02-x86_64_arm-linux-gnueabi/bin/arm-linux-gnueabi-gcc
+
+# 使用qasan 测试 ./spx_restservice
+
+指令：
+    echo -e "GET / HTTP/1.1\nHost: localhost\n" | ./qasan-qemu -E LD_PRELOAD=/home/wuhuang/fuzz/qasan/libqasan/libqasan.so -L /home/wuhuang/fuzz/qasan/cramfs-root ./spx_restservice 
+输出：
+    using ASAN_GIOVESE
+    [1266555 : 1266557 INFO][Info]: InspurWebMonitorTask Is Created Sucessfully!
+
+    [1266555 : 1266555 CRITICAL][rest.c:1103]Error while terminating web session!
+    content-type: text/html
+
+    error: NULL path_info
+    [Y]:Exiting target program...
+分析：
+    缺少变量path_info
+## 使用testbash进行实验：直接通过设置环境变量通spx_restservice交互
+1. 设置-E LD_PRELOAD和-L
+```
+export REQUEST_METHOD="GET"
+export HTTP_AUTHORIZATION="Basic dXNlcjpwYXNz"  # user:pass
+export PATH_INFO="/api/endpoint"       # 根据实际接口路径填写
+export QUERY_STRING="param1=value1"    # 根据实际参数填写
+export REMOTE_ADDR="127.0.0.1"         # 模拟客户端IP
+export SERVER_NAME="localhost"         # 服务器名
+export SERVER_PORT="80"                # 服务器端口
+export GATEWAY_INTERFACE="CGI/1.1"     # CGI 版本
+export SERVER_PROTOCOL="HTTP/1.1"      # HTTP 版本
+export CONTENT_TYPE=""                 # GET 请求通常不需要
+export CONTENT_LENGTH=""               # GET 请求通常没有请求体
+
+env | grep HTTP_
+env | grep PATH_INFO
+env | grep QUERY_STRING
+
+# 执行 CGI 程序
+./qasan-qemu -E LD_PRELOAD=/home/wuhuang/fuzz/qasan/libqasan/libqasan.so -L /home/wuhuang/fuzz/qasan/cramfs-root ./spx_restservice
+```
+输出：
+    HTTP_AUTHORIZATION=Basic dXNlcjpwYXNz
+    PATH_INFO=/api/endpoint
+    QUERY_STRING=param1=value1
+    using ASAN_GIOVESE
+    [1266699 : 1266699 CRITICAL][rest.c:1103]Error while terminating web session!
+    [1266699 : 1266701 INFO][Info]: InspurWebMonitorTask Is Created Sucessfully!
+
+    QEMU-AddressSanitizer:DEADLYSIGNAL
+    =================================================================
+    ==1266699==ERROR: QEMU-AddressSanitizer: SEGV on unknown address 0x000000000000 (pc 0x0000ff7b4578 bp 0x0000fffee9c4 sp 0x0000fffee8c0 T1266699)
+        #0 0x0000ff7b4578 in __libqasan_strlen /home/wuhuang/fuzz/qasan/libqasan/string.c:100 (discriminator 1)
+        #1 0x0000ff7b399c in strstr /home/wuhuang/fuzz/qasan/libqasan/hooks.c:549
+        #2 0x0000ff77c62c in dispatch (/home/wuhuang/fuzz/qasan/cramfs-root/usr/local/lib/libraphters.so.2.17.0+0x162c)
+        #3 0x0000ff7b2f24 in __libc_start_main /home/wuhuang/fuzz/qasan/libqasan/libqasan.c:91
+
+    QEMU-AddressSanitizer can not provide additional info.
+    SUMMARY: QEMU-AddressSanitizer:  in __libqasan_strlen /home/wuhuang/fuzz/qasan/libqasan/string.c:100 (discriminator 1)
+    ==1266699==ABORTING
+    qemu: uncaught target signal 11 (Segmentation fault) - core dumped
+    ./testbash.sh: line 18: 1266699 Segmentation fault      ./qasan-qemu -E LD_PRELOAD=/home/wuhuang/fuzz/qasan/libqasan/libqasan.so -L /home/wuhuang/fuzz/qasan/cramfs-root ./spx_restservice
+
+2. 不设置-E LD_PRELOAD
+```
+export REQUEST_METHOD="GET"
+export HTTP_AUTHORIZATION="Basic dXNlcjpwYXNz"  # user:pass
+export PATH_INFO="/api/endpoint"       # 根据实际接口路径填写
+export QUERY_STRING="param1=value1"    # 根据实际参数填写
+export REMOTE_ADDR="127.0.0.1"         # 模拟客户端IP
+export SERVER_NAME="localhost"         # 服务器名
+export SERVER_PORT="80"                # 服务器端口
+export GATEWAY_INTERFACE="CGI/1.1"     # CGI 版本
+export SERVER_PROTOCOL="HTTP/1.1"      # HTTP 版本
+export CONTENT_TYPE=""                 # GET 请求通常不需要
+export CONTENT_LENGTH=""               # GET 请求通常没有请求体
+
+env | grep HTTP_
+env | grep PATH_INFO
+env | grep QUERY_STRING
+
+# 执行 CGI 程序
+./qasan-qemu -L /home/wuhuang/fuzz/qasan/cramfs-root ./spx_restservice
+
+```
+输出：
+    HTTP_AUTHORIZATION=Basic dXNlcjpwYXNz
+    PATH_INFO=/api/endpoint
+    QUERY_STRING=param1=value1
+    using ASAN_GIOVESE
+    [1266815 : 1266817 INFO][Info]: InspurWebMonitorTask Is Created Sucessfully!
+
+    [1266815 : 1266815 CRITICAL][rest.c:1103]Error while terminating web session!
+    QEMU-AddressSanitizer:DEADLYSIGNAL
+    =================================================================
+    ==1266815==ERROR: QEMU-AddressSanitizer: SEGV on unknown address 0x000000000000 (pc 0x0000ff0f3e60 bp 0x0000fffeea2c sp 0x0000fffee944 T1266815)
+        #0 0x0000ff0f3e60 in strstr (/home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi/libc-2.13.so+0x76e60)
+        #1 0x0000ff79262c in dispatch (/home/wuhuang/fuzz/qasan/cramfs-root/usr/local/lib/libraphters.so.2.17.0+0x162c)
+
+    QEMU-AddressSanitizer can not provide additional info.
+    SUMMARY: QEMU-AddressSanitizer:  in strstr (/home/wuhuang/fuzz/qasan/cramfs-root/lib/arm-linux-gnueabi/libc-2.13.so+0x76e60)
+    ==1266815==ABORTING
+    qemu: uncaught target signal 11 (Segmentation fault) - core dumped
+    ./testbash.sh: line 18: 1266815 Segmentation fault      ./qasan-qemu -L /home/wuhuang/fuzz/qasan/cramfs-root ./spx_restservice
+
+疑问：
+为什么不指定libqasan时会出现QEMU-AddressSanitizer的信息

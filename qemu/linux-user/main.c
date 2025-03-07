@@ -609,7 +609,7 @@ int main(int argc, char **argv, char **envp)
 
 #ifdef ASAN_GIOVESE
     asan_giovese_init();
-    fprintf(stderr,"ASAN_GIOVESE");
+    fprintf(stderr,"using ASAN_GIOVESE\n");
 #endif
 
     module_call_init(MODULE_INIT_TRACE);
@@ -641,6 +641,7 @@ int main(int argc, char **argv, char **envp)
     qemu_add_opts(&qemu_trace_opts);
 
     optind = parse_args(argc, argv);
+    // fprintf(stderr,"[Y]filename: %s\n",filename);
 
     if (!trace_init_backends()) {
         exit(1);
@@ -664,7 +665,7 @@ int main(int argc, char **argv, char **envp)
     if (execfd == 0) {
         execfd = open(filename, O_RDONLY);
         if (execfd < 0) {
-            printf("Error while loading %s: %s\n", filename, strerror(errno));
+            printf("Error while loadinng %s: %s\n", filename, strerror(errno));
             _exit(EXIT_FAILURE);
         }
     }
@@ -705,6 +706,15 @@ int main(int argc, char **argv, char **envp)
 
     target_environ = envlist_to_environ(envlist, NULL);
     envlist_free(envlist);
+    // if(target_environ == NULL){
+    //     fprintf(stderr, "[Y]ERROR: target_environ is NULL.\n");
+    // }
+    // else {
+    //     for( int i = 0; target_environ[i] != NULL; i++) {
+    //         fprintf(stderr, "[Y]target_environ: %s\n", target_environ[i] );
+    //     }
+    // }
+    
 
     /*
      * Now that page sizes are configured in tcg_exec_init() we can do
@@ -780,6 +790,7 @@ int main(int argc, char **argv, char **envp)
     ret = loader_exec(execfd, filename, target_argv, target_environ, regs,
         info, &bprm);
     if (ret != 0) {
+        
         printf("Error while loading %s: %s\n", filename, strerror(-ret));
         _exit(EXIT_FAILURE);
     }

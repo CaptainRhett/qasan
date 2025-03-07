@@ -50,10 +50,8 @@ if args.debug:
 
 argv = [
   os.path.join(dir_path, "qasan-qemu"),
-  "-L",
-  "/home/wuhuang/fuzz/qasan/cramfs-root",
   "-E",
-  "LD_PRELOAD=" + os.path.join(dir_path, "libqasan.so"),
+  "LD_PRELOAD=" + os.path.join(dir_path, "libqasan/libqasan.so"),
 ]
 argv += args.target
 
