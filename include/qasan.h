@@ -44,6 +44,8 @@ enum {
   QASAN_ACTION_ENABLE,
   QASAN_ACTION_DISABLE,
   QASAN_ACTION_SWAP_STATE,
+  QASAN_ACTION_TEST,
+  QASAN_ACTION_CHECK_LEAK,
 };
 
 /* shadow map byte values */
@@ -260,5 +262,11 @@ enum {
 
 #define QASAN_SWAP(state) \
   QASAN_CALL1(QASAN_ACTION_SWAP_STATE, state)
+
+#define QASAN_TEST(ptr) \
+  QASAN_CALL1(QASAN_ACTION_TEST, ptr)
+
+#define QASAN_CHECK_LEAK() \
+  QASAN_CALL0(QASAN_ACTION_CHECK_LEAK)
 
 #endif

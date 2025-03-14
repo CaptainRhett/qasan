@@ -18,13 +18,17 @@
  */
 #include "qemu/osdep.h"
 #include "qemu.h"
-
+// #include "../../asan-giovese/asan-giovese-inl.h"
+void report_memory_leaks();
 #ifdef CONFIG_GCOV
 extern void __gcov_dump(void);
 #endif
 
 void preexit_cleanup(CPUArchState *env, int code)
 {
+
+        report_memory_leaks();
+
 #ifdef TARGET_GPROF
         _mcleanup();
 #endif

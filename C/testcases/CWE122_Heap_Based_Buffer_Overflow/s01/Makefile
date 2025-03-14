@@ -24,7 +24,7 @@ C_OBJECTS=$(C_SOURCES:.c=.o)
 CPP_SOURCES=$(filter-out $(FILTER_OUT),$(wildcard CWE*.cpp))
 CPP_OBJECTS=$(CPP_SOURCES:.cpp=.o)
 
-SIMPLES=$(filter-out $(FILTER_OUT),   $(wildcard CWE*0.c*) $(wildcard CWE*1.c*) $(wildcard CWE*2.c*) $(wildcard CWE*3.c*) $(wildcard CWE*4.c*)) \
+SIMPLES=$(filter-out $(FILTER_OUT), $(wildcard CWE*0.c*) $(wildcard CWE*1.c*) $(wildcard CWE*2.c*) $(wildcard CWE*3.c*) $(wildcard CWE*4.c*)) \
         $(filter-out $(FILTER_OUT), $(wildcard CWE*5.c*) $(wildcard CWE*6.c*) $(wildcard CWE*7.c*) $(wildcard CWE*8.c*) $(wildcard CWE*9.c*))
 SIMPLES_C=$(filter-out $(CPP_SOURCES), $(SIMPLES))
 SIMPLES_CPP=$(filter-out $(C_SOURCES), $(SIMPLES))

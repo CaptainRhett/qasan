@@ -15,4 +15,4 @@ env | grep PATH_INFO
 env | grep QUERY_STRING
 
 # 执行 CGI 程序
-./qasan-qemu -E LD_PRELOAD=/home/wuhuang/fuzz/qasan/bypass_fcgi_accept.so -L /home/wuhuang/fuzz/qasan/cramfs-root ./spx_restservice
+./qasan-qemu -E LD_PRELOAD=/home/wuhuang/fuzz/qasan/bypass_fcgi_accept.so:/home/wuhuang/fuzz/qasan/libqasan/libqasan.so -L /home/wuhuang/fuzz/qasan/cramfs-root ./spx_restservice

@@ -120,6 +120,8 @@ void asan_giovese_init(void) {
 // Checks
 // ------------------------------------------------------------------------- //
 
+// k=0则全有效，返回false，没有越界
+// (h&7)取h的低三位，+1取当前位置，如果大于k则表示超出范围，返回true表示存在越界
 int asan_giovese_load1(void* ptr) {
 
   uintptr_t h = (uintptr_t)ptr;
@@ -146,7 +148,7 @@ int asan_giovese_load4(void* ptr) {
   return k != 0 && (intptr_t)((h & 7) + 4) > k;
 
 }
-
+// 对于8字节的加载和存储操作，仅检查地址对应的影子内存条目是否为零
 int asan_giovese_load8(void* ptr) {
 
   uintptr_t h = (uintptr_t)ptr;
@@ -488,8 +490,10 @@ int asan_giovese_poison_guest_region(target_ulong addr, size_t n,
     if (n < first_size) return 0;
 
     uintptr_t h = (uintptr_t)g2h(start);
+    // fprintf(stderr,"h: %p \n",h);
     uint8_t*  shadow_addr = (uint8_t*)(h >> 3) + SHADOW_OFFSET;
     *shadow_addr = 8 - first_size;
+    // fprintf(stderr,"*shadow_addr: %d \n",*shadow_addr);
 
     start = next_8;
 
@@ -1482,3 +1486,40 @@ int asan_giovese_badfree(target_ulong addr, target_ulong pc) {
 
 }
 
+void asan_giovese_test(){
+  fprintf(stderr, "asan_giovese_test\n");
+}
+
+
+void report_memory_leaks(void) {
+  // fprintf(stderr, "checking memory leak...\n");
+  struct alloc_tree_node* node = alloc_tree_iter_first(&root, 0, (target_ulong)-1);
+  
+  size_t leak_count = 0;
+  while (node) {
+      struct alloc_tree_node* next = alloc_tree_iter_next(node, 0, (target_ulong)-1);
+      struct chunk_info *ckinfo = &node->ckinfo;
+      struct call_context *alloc_ctx = ckinfo->alloc_ctx;
+      if(alloc_ctx){
+        if(ckinfo->free_ctx == NULL) {
+          fprintf(stderr, "\n=== Memory Leak Detected ===\n");
+          leak_count++;
+          fprintf(stderr, "Memory Range: [0x%" PRIxPTR " - 0x%" PRIxPTR "]\n",
+            (uintptr_t)ckinfo->start, 
+            (uintptr_t)ckinfo->end);
+          // fprintf(stderr, "Allocated by Thread %u:\n", alloc_ctx->tid);
+          fprintf(stderr, "Call Stack (depth %u):\n", alloc_ctx->size);
+            // 打印调用栈地址
+          for (uint32_t i = 0; i < alloc_ctx->size; i++) {
+              fprintf(stderr, "  #%-2u 0x%" PRIxPTR "\n", 
+                      i, (uintptr_t)alloc_ctx->addresses[i]);
+              char* s = asan_giovese_printaddr((uintptr_t)alloc_ctx->addresses[i]);
+              fprintf(stderr,"[Y]Call Stack: %s",s);
+          }
+          fprintf(stderr, "\n");
+        }
+      }
+      node = next;
+  }
+  if(!leak_count) fprintf(stderr,"No memory leak detected.\n");
+}

@@ -260,9 +260,11 @@ if not args.system:
     libqasan_target = ''
     if args.debug:
         libqasan_target = 'debug'
-    assert ( os.system("""cd '%s' ; make %s CC='%s' CFLAGS='%s'"""
-      % (os.path.join(dir_path, "libqasan"), libqasan_target, cross_cc,
-         libqasan_cflags)) == 0 )
+    # assert ( os.system("""cd '%s' ; make %s CC='%s' CFLAGS='%s'"""
+    #   % (os.path.join(dir_path, "libqasan"), libqasan_target, cross_cc,
+    #      libqasan_cflags)) == 0 )
+    assert ( os.system("""cd '%s' ; make"""
+      % (os.path.join(dir_path, "libqasan"))) == 0 )
     
     # 将编译后的 libqasan.so 复制到当前目录
     shutil.copy2(

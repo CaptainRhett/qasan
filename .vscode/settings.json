@@ -17,6 +17,14 @@
         "utility": "cpp",
         "qasan.h": "c",
         "tcg.h": "c",
-        "unistd.h": "c"
+        "unistd.h": "c",
+        "chrono": "cpp",
+        "afl-qemu-tcg-inl.h": "c",
+        "charconv": "c",
+        "*.list": "c",
+        "*.inc": "c",
+        "qemu.h": "c",
+        "osdep.h": "c",
+        "dlfcn.h": "c"
     }
 }

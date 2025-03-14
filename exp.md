@@ -500,3 +500,724 @@ env | grep QUERY_STRING
 
 疑问：
 为什么不指定libqasan时会出现QEMU-AddressSanitizer的信息
+    因为qemu经过修改，调用了asan-giovese中的函数，打印的调试信息：
+    ```
+    int asan_giovese_deadly_signal(int signum, target_ulong addr, target_ulong pc, target_ulong bp, target_ulong sp) {
+        struct call_context ctx;
+        asan_giovese_populate_context(&ctx, pc);
+        const char* error_type = singal_to_string[signum];
+
+        fprintf(stderr,
+                ASAN_NAME_STR ":DEADLYSIGNAL\n"
+                "================================================================="
+                "\n" ANSI_COLOR_HRED "==%d==ERROR: " ASAN_NAME_STR
+                ": %s on unknown address 0x%012" PRIxPTR " (pc 0x%012" PRIxPTR
+                " bp 0x%012" PRIxPTR " sp 0x%012" PRIxPTR " T%d)" ANSI_COLOR_RESET "\n",
+                getpid(), error_type, addr, pc, bp, sp, ctx.tid);
+
+        size_t i;
+        for (i = 0; i < ctx.size; ++i) {
+
+            char* printable = asan_giovese_printaddr(ctx.addresses[i]);
+            if (printable)
+            fprintf(stderr, "    #%lu 0x%012" PRIxPTR "%s\n", i, ctx.addresses[i],
+                    printable);
+            else
+            fprintf(stderr, "    #%lu 0x%012" PRIxPTR "\n", i, ctx.addresses[i]);
+
+        }
+        
+        fputc('\n', stderr);
+        fprintf(stderr, ASAN_NAME_STR " can not provide additional info.\n");
+        ·
+        const char* printable_pc = asan_giovese_printaddr(pc);
+        if (!printable_pc) printable_pc = "";
+        fprintf(stderr,
+                "SUMMARY: " ASAN_NAME_STR
+                ": %s\n", printable_pc);
+
+        fprintf(stderr, "==%d==ABORTING\n", getpid());
+        return signum;
+        }
+    ``` 
+
+# 分析qasan在代码上是如何维护shadow memory的
+## qasan的能力分析
+堆缓冲区溢出	    通过影子内存标记堆块边界，越界访问时触发影子内存状态异常。
+栈缓冲区溢出	    利用影子栈校验返回地址，检测栈空间越界写入。
+使用未初始化内存     标记新分配内存为「未初始化」，首次访问前检查初始化状态。
+双重释放            在 free 时检查影子内存状态，若内存已释放则报错。
+内存泄漏	        跟踪未释放的堆块（需结合QASan的泄漏检测模式）。
+
+
+## 基本原理
+### malloc和free等函数的拦截
+设计了一对新的内存分配函数和内存释放函数__libqasan_malloc和__libqasan_free
+
+/home/wuhuang/fuzz/qasan/libqasan/malloc.c：
+  void* __libqasan_malloc(size_t size) {
+    // fprintf(stderr,"[Y]Calling malloc from qasan.\n");
+
+    if (!__libqasan_malloc_initialized) {
+    
+        __libqasan_init_malloc();
+
+    #ifdef __GLIBC__
+        void* r = &__tmp_alloc_zone[__tmp_alloc_zone_idx];
+
+        if (size & (ALLOC_ALIGN_SIZE - 1))
+        __tmp_alloc_zone_idx +=
+            (size & ~(ALLOC_ALIGN_SIZE - 1)) + ALLOC_ALIGN_SIZE;
+        else
+        __tmp_alloc_zone_idx += size;
+
+        return r;
+    #endif
+
+    }
+
+    int state = QASAN_SWAP(QASAN_DISABLED);  // disable qasan for this thread
+
+
+    struct chunk_begin* p = backend_malloc(sizeof(struct chunk_struct) + size);
+
+    QASAN_SWAP(state);
+
+    if (!p) return NULL;
+
+    QASAN_UNPOISON(p, sizeof(struct chunk_struct) + size);
+
+    p->requested_size = size;
+    p->aligned_orig = NULL;
+    p->next = p->prev = NULL;
+
+    QASAN_ALLOC(&p[1], (char*)&p[1] + size);
+    QASAN_POISON(p->redzone, REDZONE_SIZE, ASAN_HEAP_LEFT_RZ);
+    if (size & (ALLOC_ALIGN_SIZE - 1))
+        QASAN_POISON((char*)&p[1] + size,
+                    (size & ~(ALLOC_ALIGN_SIZE - 1)) + 8 - size + REDZONE_SIZE,
+                    ASAN_HEAP_RIGHT_RZ);
+    else
+        QASAN_POISON((char*)&p[1] + size, REDZONE_SIZE, ASAN_HEAP_RIGHT_RZ);
+
+    __builtin_memset(&p[1], 0xff, size);
+
+    return &p[1];
+
+    }
+
+/home/wuhuang/fuzz/qasan/qemu/linux-user/syscall.c:
+  abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
+                      abi_long arg2, abi_long arg3, abi_long arg4,
+                      abi_long arg5, abi_long arg6, abi_long arg7,
+                      abi_long arg8)
+  {
+      CPUState *cpu = ENV_GET_CPU(cpu_env);
+      abi_long ret;
+
+  #ifdef DEBUG_ERESTARTSYS
+      /* Debug-only code for exercising the syscall-restart code paths
+      * in the per-architecture cpu main loops: restart every syscall
+      * the guest makes once before letting it through.
+      */
+      {
+          static bool flag;
+          flag = !flag;
+          if (flag) {
+              return -TARGET_ERESTARTSYS;
+          }
+      }
+  #endif
+
+      trace_guest_user_syscall(cpu, num, arg1, arg2, arg3, arg4,
+                              arg5, arg6, arg7, arg8);
+
+      if (unlikely(do_strace)) {
+          print_syscall(num, arg1, arg2, arg3, arg4, arg5, arg6);
+          ret = do_syscall1(cpu_env, num, arg1, arg2, arg3, arg4,
+                            arg5, arg6, arg7, arg8);
+          print_syscall_ret(num, ret);
+      } else {
+          ret = do_syscall1(cpu_env, num, arg1, arg2, arg3, arg4,
+                            arg5, arg6, arg7, arg8);
+      }
+
+      trace_guest_user_syscall_ret(cpu, num, ret);
+      return ret;
+  }
+
+
+### asan_giovese_load1
+// k=0则全有效，返回false，没有越界
+// (h&7)取h的低三位，+1取当前位置，如果大于k则表示超出范围，返回true表示存在越界
+// asan-giovese-inl.h
+int asan_giovese_load1(void* ptr) {
+
+  uintptr_t h = (uintptr_t)ptr;
+  int8_t*   shadow_addr = (int8_t*)(h >> 3) + SHADOW_OFFSET;
+  int8_t    k = *shadow_addr;
+  return k != 0 && (intptr_t)((h & 7) + 1) > k;
+
+}
+将待加载的地址（ptr）右移三位，映射到影子内存的偏移量，加上影子内存区域的基地址偏移量SHADOW_OFFSET得到地址ptr对应的影子内存地址shadow_addr。可以通过该地址访问ptr对应的影子内存信息。
+
+有效性验证：
+从影子内存中读取1字节的值k，该值表示对应的8字节应用内存中第一个不可访问的字节位置。若k = 0，表示这8个字节全部可访问；若k > 0，则前k个字节可访问，后续字节不可访问（如k=3表示前3字节可访问，后5字节不可访问）。
+
+偏移量计算与边界检查：
+h & 7获取指针在8字节块内的偏移量（0~7），例如地址0x123A的偏移量为0xA % 8 = 2。
+检查(h & 7) + 1（访问的1字节内存的结束位置）是否超过k。若超过，说明访问越界。
+
+示例分析：
+若k = 3（前3字节可访问）
+访问偏移量2的1字节：结束位置为3（2+1），等于k，合法。
+访问偏移量3的1字节：结束位置为4，超过k，触发非法访问.
+返回值逻辑：
+当k != 0且(h & 7) + 1 > k时返回true，表示检测到无效内存访问；否则返回false。
+
+
+// 对于8字节的加载和存储操作，仅检查地址对应的影子内存条目是否为零
+int asan_giovese_load8(void* ptr) {
+
+  uintptr_t h = (uintptr_t)ptr;
+  int8_t*   shadow_addr = (int8_t*)(h >> 3) + SHADOW_OFFSET;
+  return (*shadow_addr);
+
+}
+#### asan_giovese_load1的调用链分析
+/home/wuhuang/fuzz/qasan/asan-giovese/asan-giovese-inl.h:
+    int asan_giovese_load1(void* ptr) {
+        uintptr_t h = (uintptr_t)ptr;
+        int8_t*   shadow_addr = (int8_t*)(h >> 3) + SHADOW_OFFSET;
+        int8_t    k = *shadow_addr;
+        return k != 0 && (intptr_t)((h & 7) + 1) > k;
+        }
+
+/home/wuhuang/fuzz/qasan/qemu/accel/tcg/tcg-runtime.c:
+    void HELPER(qasan_load1)(CPUArchState *env, target_ulong addr) 
+/home/wuhuang/fuzz/qasan/qemu/include/exec/helper-head.h:
+    #define HELPER(name) glue(helper_, name)
+    生成 helper_qasan_load1()函数，调用asan_giovese_load1()
+
+/home/wuhuang/fuzz/qasan/qemu/accel/tcg/tcg-runtime.h:
+    DEF_HELPER_FLAGS_2(qasan_load1, TCG_CALL_NO_RWG, void, env, tl)
+
+/home/wuhuang/fuzz/qasan/qemu/include/exec/helper-gen.h:
+    #define DEF_HELPER_FLAGS_2(name, flags, ret, t1, t2)                    \
+    static inline void glue(gen_helper_, name)(dh_retvar_decl(ret)          \
+        dh_arg_decl(t1, 1), dh_arg_decl(t2, 2))                             \
+    {                                                                       \
+    TCGTemp *args[2] = { dh_arg(t1, 1), dh_arg(t2, 2) };                  \
+    tcg_gen_callN(HELPER(name), dh_retvar(ret), 2, args);                 \
+    }
+    生成gen_helper_qasan_load1()函数，并使用tcg_gen_callN函数调用helper_qasan_load1()函数
+
+/home/wuhuang/fuzz/qasan/qemu/tcg/tcg-op.c:
+    void tcg_gen_qemu_ld_i32(TCGv_i32 val, TCGv addr, TCGArg idx, TCGMemOp memop)
+    {
+        tcg_gen_req_mo(TCG_MO_LD_LD | TCG_MO_ST_LD);
+        memop = tcg_canonicalize_memop(memop, 0, 0);
+        trace_guest_mem_before_tcg(tcg_ctx->cpu, cpu_env,
+                                addr, trace_mem_get_info(memop, 0));
+                                
+        gen_ldst_i32(INDEX_op_qemu_ld_i32, val, addr, memop, idx);
+        switch (memop & MO_SIZE) {
+            case MO_64: qasan_gen_load8(addr, idx); break;
+            case MO_32: qasan_gen_load4(addr, idx); break;
+            case MO_16: qasan_gen_load2(addr, idx); break;
+            case MO_8:  qasan_gen_load1(addr, idx); break;
+            default: qasan_gen_load4(addr, idx); break;
+        }
+    }
+    // 根据内存操作的大小（MO_SIZE），调用对应的QASan检查函数
+
+    #define GEN_QASAN_OP(OP) \
+    void qasan_gen_##OP(TCGv addr, int off) { \
+    \
+    (void*)off; \
+    if (cur_block_is_good) \
+        gen_helper_qasan_##OP(cpu_env, addr); \
+    \
+    }
+    宏GEN_QASAN_OP(OP)动态生成一个名为 qasan_gen_##OP 的函数，其中 ## 是宏的拼接符，会将传入的 OP 参数拼接到函数名中。
+    
+    GEN_QASAN_OP(load1)
+    实例化宏生成函数 qasan_gen_load1，对应1字节内存加载操作（如 ldrb 指令）。
+
+    qasan_gen_load1(addr, idx)调用gen_helper_qasan_load1()函数
+
+tcg_gen_qemu_ld_i32()
+    -> qasan_gen_load1(addr, idx)
+        -> gen_helper_qasan_load1
+            -> helper_qasan_load1()
+                -> asan_giovese_load1()
+
+
+
+问题1：qemu是在哪里调用了asan_giovese_load函数？
+//----------------------------------
+// Usermode helpers
+//----------------------------------
+void HELPER(qasan_load1)(CPUArchState *env, target_ulong addr) {
+
+  if (qasan_disabled) return;
+  
+  void* ptr = (void*)g2h(addr);
+
+#ifdef ASAN_GIOVESE
+  if (asan_giovese_load1(ptr)) {
+    asan_giovese_report_and_crash(ACCESS_TYPE_LOAD, addr, 1, PC_GET(env), BP_GET(env), SP_GET(env));
+  }
+#else
+  __asan_load1(ptr);
+#endif
+
+}
+
+qasan_load1的调用：
+//helper-tcg.h
+#define DEF_HELPER_FLAGS_2(NAME, FLAGS, ret, t1, t2) \
+  { .func = HELPER(NAME), .name = str(NAME), .flags = FLAGS, \
+    .sizemask = dh_sizemask(ret, 0) | dh_sizemask(t1, 1) \
+    | dh_sizemask(t2, 2) },
+
+//helper-proto.h
+#define DEF_HELPER_FLAGS_2(name, flags, ret, t1, t2) \
+dh_ctype(ret) HELPER(name) (dh_ctype(t1), dh_ctype(t2));
+//helper-gen.h
+
+#define DEF_HELPER_FLAGS_2(name, flags, ret, t1, t2)                    \
+static inline void glue(gen_helper_, name)(dh_retvar_decl(ret)          \
+    dh_arg_decl(t1, 1), dh_arg_decl(t2, 2))                             \
+{                                                                       \
+  TCGTemp *args[2] = { dh_arg(t1, 1), dh_arg(t2, 2) };                  \
+  tcg_gen_callN(HELPER(name), dh_retvar(ret), 2, args);                 \
+}
+
+宏的作用与阶段划分
+这三个宏分别属于 代码生成流程的不同阶段，通过宏重定义（Redefine）实现多态性，具体分工如下：
+
+头文件	作用阶段	功能
+helper-proto.h	函数原型声明	生成Helper函数的原型声明（如 ret helper_name(t1, t2)）
+helper-tcg.h	Helper描述结构	定义Helper函数的元数据结构（如函数指针、参数类型、调用标志等）
+helper-gen.h	调用代码生成	生成调用Helper函数的TCG中间代码（如 tcg_gen_callN 操作）
+
+在大型项目（如QEMU）中，多个同名宏 `DEF_HELPER_FLAGS_2` 的存在是为了实现 **分阶段代码生成**。虽然宏名称相同，但它们在不同的上下文中被定义和展开，服务于不同的代码生成阶段，通过条件编译或包含顺序避免冲突。以下是具体分析：
+
+---
+
+**2. 具体展开过程**
+**(1) `helper-proto.h`：生成函数原型**
+```c
+// 定义原型声明宏
+#define DEF_HELPER_FLAGS_2(name, flags, ret, t1, t2) \
+dh_ctype(ret) HELPER(name) (dh_ctype(t1), dh_ctype(t2));
+```
+- **作用**：  
+  将 `DEF_HELPER_FLAGS_2(foo, 0, i32, i32, i32)` 展开为：  
+  ```c
+  uint32_t helper_foo(uint32_t, uint32_t);  // 函数原型
+  ```
+- **意义**：  
+  在编译时声明Helper函数的原型，供其他代码调用。
+
+---
+
+**(2) `helper-tcg.h`：生成元数据结构**
+```c
+// 定义Helper描述宏
+#define DEF_HELPER_FLAGS_2(NAME, FLAGS, ret, t1, t2) \
+  { .func = HELPER(NAME), .name = str(NAME), .flags = FLAGS, \
+    .sizemask = dh_sizemask(ret, 0) | dh_sizemask(t1, 1) | dh_sizemask(t2, 2) },
+```
+- **作用**：  
+  将 `DEF_HELPER_FLAGS_2(foo, 0, i32, i32, i32)` 展开为：  
+  ```c
+  { .func = helper_foo, .name = "foo", .flags = 0, 
+    .sizemask = ... },  // 描述Helper函数的结构体
+  ```
+- **意义**：  
+  构建一个全局的Helper函数描述表，记录函数指针、名称、参数类型等信息，供动态代码生成（如TCG）使用。
+
+---
+
+**(3) `helper-gen.h`：生成调用代码**
+```c
+// 定义调用生成宏
+#define DEF_HELPER_FLAGS_2(name, flags, ret, t1, t2) \
+static inline void gen_helper_##name(...) { \
+  tcg_gen_callN(helper_##name, ...); \
+}
+```
+- **作用**：  
+  将 `DEF_HELPER_FLAGS_2(foo, 0, i32, i32, i32)` 展开为：  
+  ```c
+  static inline void gen_helper_foo(...) { 
+    tcg_gen_callN(helper_foo, ...);  // 生成调用helper_foo的TCG代码
+  }
+  ```
+- **意义**：  
+  生成静态内联函数 `gen_helper_foo`，用于在翻译ARM指令时插入对 `helper_foo` 的调用。
+
+---
+
+**3. 为何不冲突？**
+**(1) 分阶段包含**
+项目通过 **控制头文件包含顺序** 和 **条件编译**，确保每个阶段只展开对应的宏定义：
+1. 在需要生成原型时包含 `helper-proto.h`，此时宏定义为原型声明。
+2. 在需要构建Helper表时包含 `helper-tcg.h`，此时宏被重定义为结构体初始化。
+3. 在需要生成调用代码时包含 `helper-gen.h`，此时宏被重定义为中间代码生成。
+
+**(2) 宏的覆盖性**
+C语言的宏遵循 **后定义覆盖前定义** 的规则。通过合理组织头文件包含顺序，确保每个阶段使用正确的宏定义：
+```c
+// 第一阶段：生成原型
+#include "helper-proto.h"
+DEF_HELPER_FLAGS_2(foo, ...);  // 展开为原型声明
+
+// 第二阶段：生成结构体
+#undef DEF_HELPER_FLAGS_2       // 取消之前的定义
+#include "helper-tcg.h"
+DEF_HELPER_FLAGS_2(foo, ...);  // 展开为结构体初始化
+
+// 第三阶段：生成调用代码
+#undef DEF_HELPER_FLAGS_2
+#include "helper-gen.h"
+DEF_HELPER_FLAGS_2(foo, ...);  // 展开为调用生成函数
+```
+
+---
+
+**4. 设计优势**
+这种设计模式在系统级项目（如QEMU）中非常常见，核心优势在于：
+1. **代码复用**：通过宏模板统一管理不同阶段的代码生成，减少重复代码。
+2. **扩展性**：新增一个Helper函数只需在单个位置定义，自动生成原型、元数据和调用代码。
+3. **类型安全**：通过 `dh_ctype` 等宏处理类型转换，确保参数类型正确性。
+
+---
+
+**总结**
+这三个同名宏 `DEF_HELPER_FLAGS_2` 本质上是一个 **代码生成模板**，通过宏重定义在不同阶段生成不同的代码片段。这种设计模式在需要多阶段代码生成的场景中非常高效，尽管看起来有些“魔法”，但通过合理的工程组织确保了可维护性和扩展性。
+
+
+我使用fprintf(stderr,"qasan_load1");调试时发现qemu-arm并没有调用HELPER(qasan_load1)，故不再纠结
+错误：
+
+
+
+### qasan_shadow_stack_push
+进一步调试发现：
+在运行过程中调用了：
+void HELPER(qasan_shadow_stack_push)(target_ulong ptr) {
+  fprintf(stderr,"qasan_shadow_stack_push\n");
+
+#if defined(TARGET_ARM)
+  ptr &= ~1; 
+#endif
+
+  if (unlikely(!qasan_shadow_stack.first)) {
+    
+    qasan_shadow_stack.first = malloc(sizeof(struct shadow_stack_block));
+    qasan_shadow_stack.first->index = 0;
+    qasan_shadow_stack.size = 0; // may be negative due to last pop
+    qasan_shadow_stack.first->next = NULL;
+
+  }
+    
+  qasan_shadow_stack.first->buf[qasan_shadow_stack.first->index++] = ptr;
+  qasan_shadow_stack.size++;
+
+  if (qasan_shadow_stack.first->index >= SHADOW_BK_SIZE) {
+
+      struct shadow_stack_block* ns = malloc(sizeof(struct shadow_stack_block));
+      ns->next = qasan_shadow_stack.first;
+      ns->index = 0;
+      qasan_shadow_stack.first = ns;
+  }
+
+}
+
+
+#### 分析
+这段代码实现了一个 **影子栈（Shadow Stack）的压入操作**，主要用于QEMU的地址消毒（QASan）功能，检测程序执行过程中的栈溢出或异常跳转。以下是逐部分解析：
+
+qasan_shadow_stack:
+```c
+struct shadow_stack_block {
+
+  int index;
+  target_ulong buf[SHADOW_BK_SIZE];
+  
+  struct shadow_stack_block* next;
+
+};
+
+struct shadow_stack {
+
+  int size;
+  struct shadow_stack_block* first;
+
+};
+```
+
+1. ARM架构地址修正
+```c
+#if defined(TARGET_ARM)
+  ptr &= ~1; // 清除最低位（ARM/Thumb模式切换标志）
+#endif
+```  
+  ARM架构中，指令地址的最低位用于指示Thumb模式（1表示Thumb，0表示ARM）。    
+  若目标平台是ARM，清除 `ptr` 的最低位，确保地址对齐（实际指令地址是字对齐的）。
+
+2. 影子栈初始化
+```c
+  if (unlikely(!qasan_shadow_stack.first)) { // 首次使用栈时初始化
+    qasan_shadow_stack.first = malloc(sizeof(struct shadow_stack_block));
+    qasan_shadow_stack.first->index = 0;
+    qasan_shadow_stack.size = 0; // 可能因上次弹出操作变为负数
+    qasan_shadow_stack.first->next = NULL;
+  }
+```
+
+  - 若影子栈的 `first` 块未初始化（`NULL`），则分配一个内存块（`shadow_stack_block`）。  
+  - 初始化块属性：  
+    - `index=0`：当前块的空闲位置索引。  
+    - `size=0`：全局栈大小（可能因异常操作变为负数，此处重置）。  
+    - `next=NULL`：块链表指针。  
+- **优化**：  
+  `unlikely()` 提示编译器此分支很少发生（优化分支预测）。
+
+---
+3. 压入当前地址
+```c
+  qasan_shadow_stack.first->buf[qasan_shadow_stack.first->index++] = ptr;
+  qasan_shadow_stack.size++;
+```
+- **操作**：  
+  将 `ptr` 存入当前块的 `buf` 数组中，递增当前块的 `index` 和全局栈大小 `size`。
+
+---
+
+4. 栈块动态扩展
+```c
+  if (qasan_shadow_stack.first->index >= SHADOW_BK_SIZE) { // 当前块已满
+    struct shadow_stack_block* ns = malloc(sizeof(struct shadow_stack_block));
+    ns->next = qasan_shadow_stack.first; // 新块指向旧块
+    ns->index = 0; // 新块索引重置
+    qasan_shadow_stack.first = ns; // 更新栈顶为新块
+  }
+```
+- **逻辑**：  
+  - 若当前块的 `index` 达到 `SHADOW_BK_SIZE`（块容量上限），则分配新块。  
+  - 新块的 `next` 指向旧块，形成链表结构。  
+  - 更新栈顶指针 `first` 为新块，后续压入操作将使用新块。
+
+
+
+问题2：在程序结束时，如何判断是否存在内存泄露？
+问题3：poison机制是什么？
+问题4：误报率是如何解决的？
+
+
+
+## 内存泄露检测
+
+可以利用 alloc_tree 维护的分配信息，并结合 shadow memory，在程序退出时检查是否仍然存在未释放的内存块。
+
+算法思路
+遍历 alloc_tree，检查所有分配的内存块
+
+alloc_tree 维护了所有 malloc 分配的内存块信息，包括 start 和 end 地址。
+在程序退出时，遍历 alloc_tree，获取所有仍然存在的分配块。
+检查 shadow memory
+
+通过 g2h(start) 计算 shadow memory 地址，并检查是否仍然标记为已分配。
+如果 shadow memory 仍然标记为已分配，说明该内存块没有被释放。
+记录和报告内存泄露信息
+
+统计泄露的块数，并输出泄露的地址范围及大小。
+记录相关的 alloc_ctx（调用上下文），帮助分析泄露来源。
+程序退出时执行
+
+在 __libqasan_exit() 或 qasan_finalize() 这样的退出函数中执行泄露检查逻辑。
+
+### 子程序退出
+
+#ifdef __NR_exit_group
+        /* new thread calls */
+    case TARGET_NR_exit_group:
+        fprintf(stderr,"[Y]:Exiting target program...\n");
+        preexit_cleanup(cpu_env, arg1);
+        return get_errno(exit_group(arg1));
+
+case TARGET_NR_exit:
+        /* In old applications this may be used to implement _exit(2).
+           However in threaded applictions it is used for thread termination,
+           and _exit_group is used for application termination.
+           Do thread termination if we have more then one thread.  */
+
+        if (block_signals()) {
+            return -TARGET_ERESTARTSYS;
+        }
+
+        cpu_list_lock();
+
+        if (CPU_NEXT(first_cpu)) {
+            TaskState *ts;
+
+            /* Remove the CPU from the list.  */
+            QTAILQ_REMOVE_RCU(&cpus, cpu, node);
+
+            cpu_list_unlock();
+
+            ts = cpu->opaque;
+            if (ts->child_tidptr) {
+                put_user_u32(0, ts->child_tidptr);
+                sys_futex(g2h(ts->child_tidptr), FUTEX_WAKE, INT_MAX,
+                          NULL, NULL, 0);
+            }
+            thread_cpu = NULL;
+            object_unref(OBJECT(cpu));
+            g_free(ts);
+            rcu_unregister_thread();
+            pthread_exit(NULL);
+        }
+
+        cpu_list_unlock();
+        preexit_cleanup(cpu_env, arg1);
+        _exit(arg1);
+        return 0; /* avoid warning */
+preexit_cleanup() 是退出前检查的核心，计划在preexit_cleanup()函数中增加检查内存泄露的逻辑
+
+
+
+### 获取环境变量
+在/home/wuhuang/fuzz/qasan/asan-giovese/asan-giovese-inl.h中定义了qasan_check_leak获取环境变量，用于进行消融实验
+
+void report_memory_leaks() {
+  char* qasan_check_leak;
+  qasan_check_leak = getenv("CHECK_LEAK");
+  if(qasan_check_leak)
+  fprintf(stderr, "Detected memory leaks:\n");}
+
+(base) wuhuang@wuhuang:~/fuzz/qasan$ ./qasan-qemu -L /home/wuhuang/fuzz/qasan/cramfs-root -E LD_PRELOAD=/home/wuhuang/fuzz/qasan/libqasan/libqasan.so ./tests/heap_of
+using ASAN_GIOVESE
+qasan_action_testasan_giovese_test
+Enter input: 111
+No exploit detected!
+
+(base) wuhuang@wuhuang:~/fuzz/qasan$ CHECK_LEAK=1 ./qasan-qemu -L /home/wuhuang/fuzz/qasan/cramfs-root -E LD_PRELOAD=/home/wuhuang/fuzz/qasan/libqasan/libqasan.so ./tests/heap_of
+using ASAN_GIOVESE
+qasan_action_testasan_giovese_test
+Enter input: 111
+No exploit detected!
+Detected memory leaks:
+
+指定环境变量 CHECK_LEAK 时，可以触发 check leak 的逻辑。
+此处需要更多的完善：
+  - 最好是可以通过-E 设置是否进行检查
+  - 检查环境变量的逻辑不完备
+
+
+# 
+QASAN_ALLOC(&p[1], (char*)&p[1] + size);
+
+#define QASAN_ALLOC(start, end) \
+  QASAN_CALL2(QASAN_ACTION_ALLOC, start, end)
+
++---------------------------+
+| struct chunk_begin        | ← p 指向这里
+|   requested_size          |
+|   aligned_orig            |
+|   next                    |
+|   prev                    |
+|   redzone[REDZONE_SIZE]   | <- p->redzone LZ protection region
++---------------------------+ 
+| user memory               | <- &p[1]
+|                           | size = requested_size
++---------------------------+
+| struct chunk_struct begin | <- (char*)&p[1] + size 
+|  padding region(for align)| 
+|  redzone[REDZONE_SIZE]    | <- RZ protection region
+|  prev_size_padding        |
++---------------------------+
+
+#define QASAN_POISON(ptr, len, poison_byte) \
+  QASAN_CALL3(QASAN_ACTION_POISON, ptr, len, poison_byte)
+
+case QASAN_ACTION_POISON:
+        // fprintf(stderr, "POISON: %p [%p] %ld %x\n", arg1, g2h(arg1), arg2, arg3);
+        asan_giovese_poison_guest_region(arg1, arg2, arg3);
+        break;
+
+int asan_giovese_poison_guest_region(target_ulong addr, size_t n,
+                                     uint8_t poison_byte) {
+
+  if (!n) return 0;
+  
+  target_ulong start = addr;
+  target_ulong end = start + n;
+  target_ulong last_8 = end & ~7;
+  
+  if (start & 0x7) {
+
+    target_ulong next_8 = (start & ~7) + 8;
+    size_t       first_size = next_8 - start;
+
+    if (n < first_size) return 0;
+
+    uintptr_t h = (uintptr_t)g2h(start);
+    uint8_t*  shadow_addr = (uint8_t*)(h >> 3) + SHADOW_OFFSET;
+    *shadow_addr = 8 - first_size;
+
+    start = next_8;
+
+  }
+
+  while (start < last_8) {
+
+    uintptr_t h = (uintptr_t)g2h(start);
+    uint8_t*  shadow_addr = (uint8_t*)(h >> 3) + SHADOW_OFFSET;
+    *shadow_addr = poison_byte;
+    start += 8;
+
+  }
+  return 1;
+
+}
+
+int asan_giovese_unpoison_guest_region(target_ulong addr, size_t n) {
+
+  target_ulong start = addr;
+  target_ulong end = start + n;
+
+  while (start < end) {
+
+    uintptr_t h = (uintptr_t)g2h(start);
+    uint8_t*  shadow_addr = (uint8_t*)(h >> 3) + SHADOW_OFFSET;
+    *shadow_addr = 0;
+    start += 8;
+
+  }
+
+  return 1;
+
+}
+# Juliet
+TP（真正例）：实际存在内存泄漏，工具正确检测到。
+FP（假正例）：实际没有内存泄漏，工具误报为有泄漏。
+TN（真负例）：实际没有内存泄漏，工具正确检测到没有泄漏。
+FN（假负例）：实际存在内存泄漏，工具却未能检测到。
+
+TP（True Positive） = bad() 运行的次数（即 bad() 发生泄露并正确被检测到）。
+FP（False Positive） = 0（good() 没有泄露，并且没有被误报）。
+TN（True Negative） = good() 运行的次数（good() 没有泄露，并正确未被误报）。
+FN（False Negative） = 0（所有 bad() 发生的泄露都被检测到了）。
+
+True Positives (TP):  649
+False Negatives (FN): 714
+True Negatives (TN):  1363
+False Positives (FP): 0
+
+总测试用例: 2726
+准确率: 73.81%

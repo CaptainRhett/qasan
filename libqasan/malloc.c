@@ -165,6 +165,7 @@ size_t __libqasan_malloc_usable_size(void* ptr) {
 }
 
 void* __libqasan_malloc(size_t size) {
+  // fprintf(stderr, "[QASAN] malloc request: %zu bytes\n", size);
   // fprintf(stderr,"[Y]Calling malloc from qasan.\n");
 
   if (!__libqasan_malloc_initialized) {
@@ -187,6 +188,7 @@ void* __libqasan_malloc(size_t size) {
 
   int state = QASAN_SWAP(QASAN_DISABLED);  // disable qasan for this thread
 
+
   struct chunk_begin* p = backend_malloc(sizeof(struct chunk_struct) + size);
 
   QASAN_SWAP(state);
@@ -194,6 +196,8 @@ void* __libqasan_malloc(size_t size) {
   if (!p) return NULL;
 
   QASAN_UNPOISON(p, sizeof(struct chunk_struct) + size);
+  // fprintf(stderr,"unpoison begins: %p, size: %d \n",p ,sizeof(struct chunk_struct) + size );
+  // fprintf(stderr,"size of chunck begin: %d\n",sizeof(struct chunk_begin));
 
   p->requested_size = size;
   p->aligned_orig = NULL;
@@ -201,20 +205,29 @@ void* __libqasan_malloc(size_t size) {
 
   QASAN_ALLOC(&p[1], (char*)&p[1] + size);
   QASAN_POISON(p->redzone, REDZONE_SIZE, ASAN_HEAP_LEFT_RZ);
+  // fprintf(stderr,"poison begins: %p, size: %d \n",p->redzone ,REDZONE_SIZE);
   if (size & (ALLOC_ALIGN_SIZE - 1))
-    QASAN_POISON((char*)&p[1] + size,
+    {
+      QASAN_POISON((char*)&p[1] + size,
                  (size & ~(ALLOC_ALIGN_SIZE - 1)) + 8 - size + REDZONE_SIZE,
                  ASAN_HEAP_RIGHT_RZ);
+    }
   else
-    QASAN_POISON((char*)&p[1] + size, REDZONE_SIZE, ASAN_HEAP_RIGHT_RZ);
+    {
+      QASAN_POISON((char*)&p[1] + size, REDZONE_SIZE, ASAN_HEAP_RIGHT_RZ);
+      // fprintf(stderr,"poison begins: %p, size: %d \n",(char*)&p[1] + size, REDZONE_SIZE);
+    }
 
   __builtin_memset(&p[1], 0xff, size);
+
+  // fprintf(stderr, "[QASAN] malloc successful: allocated %zu bytes at %p\n", size, &p[1]);
 
   return &p[1];
 
 }
 
 void __libqasan_free(void* ptr) {
+  // fprintf(stderr, "[QASAN] free request at %p \n", ptr);
   calling_times -= 1;
   // fprintf(stderr,"[Y]Calling free from qasan.\n");
 

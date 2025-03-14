@@ -185,7 +185,7 @@ __thread CPUState* qasan_cpu;
   ({ \
     void *_a; \
     if (!qasan_addr_to_host(qasan_cpu, (x), &_a)) {\
-      /* fprintf(stderr, "QASan error: virtual address translation for %p failed!\n", (x)); */ \
+      fprintf(stderr, "QASan error: virtual address translation for %p failed!\n", (x));  \
       return 0;\
     } \
     _a; \
@@ -212,6 +212,7 @@ __thread struct shadow_stack qasan_shadow_stack;
 #include <sys/syscall.h>
 
 void asan_giovese_populate_context(struct call_context* ctx, target_ulong pc) {
+  // fprintf(stderr,"asan_giovese_populate_context");
 
   ctx->size = MIN(qasan_shadow_stack.size, qasan_max_call_stack -1) +1;
   ctx->addresses = calloc(sizeof(void*), ctx->size);
@@ -443,7 +444,7 @@ void HELPER(qasan_shadow_stack_pop)(target_ulong ptr) {
 #if defined(TARGET_ARM)
   ptr &= ~1;
 #endif
-
+  // fprintf(stderr,"qasan_shadow_stack_pop");
   struct shadow_stack_block* cur_bk = qasan_shadow_stack.first;
   if (unlikely(cur_bk == NULL)) return;
 
@@ -539,18 +540,28 @@ target_long qasan_actions_dispatcher(void *cpu_env,
         }
         
         case QASAN_ACTION_DEALLOC: {
-          //fprintf(stderr, "DEALLOC: %p\n", arg1);
+          // fprintf(stderr, "DEALLOC1: %p\n", arg1);
           struct chunk_info* ckinfo = asan_giovese_alloc_search(arg1);
+          // fprintf(stderr,"chunk info-> start: %p \n",ckinfo->start);
           if (ckinfo) {
             if (ckinfo->start != arg1)
               asan_giovese_badfree(arg1, PC_GET(env));
             ckinfo->free_ctx = calloc(sizeof(struct call_context), 1);
+            // fprintf(stderr, "DEALLOC: %p\n", ckinfo->free_ctx);
             asan_giovese_populate_context(ckinfo->free_ctx, PC_GET(env));
           } else {
             asan_giovese_badfree(arg1, PC_GET(env));
           }
           break;
         }
+
+        case QASAN_ACTION_TEST: {
+          fprintf(stderr, "qasan_action_test");
+          asan_giovese_test();
+          break;
+        }
+
+
 #else
         case QASAN_ACTION_CHECK_LOAD:
         __asan_loadN(g2h(arg1), arg2);
@@ -606,6 +617,7 @@ target_long qasan_actions_dispatcher(void *cpu_env,
 
 void* HELPER(qasan_fake_instr)(CPUArchState *env, void* action, void* arg1,
                                void* arg2, void* arg3) {
+  fprintf(stderr,"qasan_fake_instr\n");
 
   return (void*)qasan_actions_dispatcher(env,
                                          (target_long)action, (target_long)arg1,
@@ -679,6 +691,7 @@ void qasan_page_storeN(CPUArchState *env, target_ulong addr, size_t size, uintpt
 
 void HELPER(qasan_load1)(CPUArchState *env, target_ulong addr, uint32_t idx)
 {
+  fprintf(stderr,"qasan_load1");
     if (qasan_disabled) return;
     
     uintptr_t mmu_idx = idx;
@@ -1058,6 +1071,7 @@ void HELPER(qasan_store8)(CPUArchState *env, target_ulong addr, uint32_t idx)
 //----------------------------------
 
 void HELPER(qasan_load1)(CPUArchState *env, target_ulong addr) {
+  // fprintf(stderr,"qasan_load1");
 
   if (qasan_disabled) return;
   
@@ -1074,6 +1088,7 @@ void HELPER(qasan_load1)(CPUArchState *env, target_ulong addr) {
 }
 
 void HELPER(qasan_load2)(CPUArchState *env, target_ulong addr) {
+  // fprintf(stderr,"qasan_load2");
 
   if (qasan_disabled) return;
 
@@ -1090,6 +1105,7 @@ void HELPER(qasan_load2)(CPUArchState *env, target_ulong addr) {
 }
 
 void HELPER(qasan_load4)(CPUArchState *env, target_ulong addr) {
+  // fprintf(stderr,"qasan_load4");
 
   if (qasan_disabled) return;
   
@@ -1106,6 +1122,7 @@ void HELPER(qasan_load4)(CPUArchState *env, target_ulong addr) {
 }
 
 void HELPER(qasan_load8)(CPUArchState *env, target_ulong addr) {
+  // fprintf(stderr,"qasan_load8");
 
   if (qasan_disabled) return;
   
